@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>จองคิวบริจาคเลือด รพ.อ่างทอง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --red:#c62828; --red-d:#8e1b1b; --bg:#faf6f5; --ink:#222; --mute:#6b6b6b; --line:#e6dcda; --ok:#2e7d32; --warn:#b26a00; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Sarabun", "Noto Sans Thai", sans-serif; background:var(--bg); color:var(--ink); line-height:1.5; }
+  header { background:var(--red); color:#fff; padding:14px 16px; font-weight:700; position:sticky; top:0; z-index:5; }
+  header small { display:block; font-weight:400; opacity:.85; font-size:12px; }
+  main { padding:16px; max-width:560px; margin:0 auto; padding-bottom:48px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  h2 { font-size:18px; margin:0 0 10px; }
+  p { margin:6px 0; }
+  .mute { color:var(--mute); font-size:13px; }
+  .disclaimer { background:#fff4e5; border:1px solid #f3d29c; color:#6a4300; border-radius:10px; padding:10px 12px; font-size:13px; margin:12px 0; }
+  .banner { background:#e8f1ff; border:1px solid #b9d3ff; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
+  button, .btn { display:block; width:100%; border:0; border-radius:12px; padding:13px; font-size:16px; font-weight:600; background:var(--red); color:#fff; margin-top:10px; text-align:center; text-decoration:none; font-family:inherit; }
+  button.secondary, .btn.secondary { background:#fff; color:var(--red); border:1.5px solid var(--red); }
+  button.link { background:none; color:var(--mute); font-weight:400; font-size:14px; text-decoration:underline; }
+  button:disabled { opacity:.45; }
+  label { display:block; font-weight:600; margin:12px 0 4px; font-size:14px; }
+  input[type=text], input[type=tel] { width:100%; padding:11px; border:1px solid var(--line); border-radius:10px; font-size:16px; font-family:inherit; }
+  .q { padding:12px 0; border-top:1px solid var(--line); }
+  .q:first-of-type { border-top:0; }
+  .opts { display:flex; gap:8px; margin-top:8px; }
+  .opts label { flex:1; margin:0; font-weight:500; border:1.5px solid var(--line); border-radius:10px; padding:9px; text-align:center; cursor:pointer; }
+  .opts input { display:none; }
+  .opts input:checked + span { color:var(--red); font-weight:700; }
+  .opts label:has(input:checked) { border-color:var(--red); background:#fdecec; }
+  .dates { display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; }
+  .date { flex:0 0 auto; min-width:64px; border:1.5px solid var(--line); border-radius:12px; background:#fff; padding:8px 6px; text-align:center; color:var(--ink); font-weight:500; margin:0; font-size:13px; }
+  .date b { display:block; font-size:20px; }
+  .date.sel { border-color:var(--red); background:#fdecec; color:var(--red); }
+  .slot { display:flex; justify-content:space-between; align-items:center; background:#fff; color:var(--ink); border:1.5px solid var(--line); text-align:left; font-weight:500; }
+  .slot.sel { border-color:var(--red); background:#fdecec; }
+  .slot:disabled { background:#f1ecea; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:99px; background:#eee; }
+  .tag.ok { background:#e5f4e6; color:var(--ok); } .tag.bad { background:#fde8e8; color:var(--red-d); } .tag.warn { background:#fff1da; color:var(--warn); }
+  ul.reasons { padding-left:20px; margin:8px 0; }
+  .center { text-align:center; padding:40px 0; color:var(--mute); }
+  .err { background:#fde8e8; color:var(--red-d); border-radius:10px; padding:10px 12px; margin:10px 0; font-size:14px; }
+</style>
+</head>
+<body>
+<header>ธนาคารเลือด โรงพยาบาลอ่างทอง<small>ระบบจองคิวบริจาคเลือด</small></header>
+<main id="app"><div class="center">กำลังโหลด...</div></main>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

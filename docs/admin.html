@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>แดชบอร์ดเจ้าหน้าที่ - ธนาคารเลือด รพ.อ่างทอง</title>
+<style>
+  :root { --red:#c62828; --red-d:#8e1b1b; --bg:#f7f3f2; --ink:#222; --mute:#6b6b6b; --line:#e3d9d7; --ok:#2e7d32; --warn:#b26a00; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Sarabun", "Noto Sans Thai", sans-serif; background:var(--bg); color:var(--ink); line-height:1.5; }
+  header { background:var(--red); color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  header b { font-size:17px; } header small { opacity:.85; }
+  nav { display:flex; gap:4px; padding:10px 16px 0; overflow-x:auto; border-bottom:1px solid var(--line); background:#fff; }
+  nav button { border:0; background:none; padding:10px 14px; font-size:15px; font-family:inherit; cursor:pointer; color:var(--mute); border-bottom:3px solid transparent; white-space:nowrap; }
+  nav button.on { color:var(--red); border-color:var(--red); font-weight:700; }
+  main { padding:16px; max-width:980px; margin:0 auto; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; overflow-x:auto; }
+  h2 { font-size:18px; margin:0 0 10px; } h3 { font-size:15px; margin:14px 0 6px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--mute); font-weight:600; font-size:13px; }
+  input, select, button.btn { font-family:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  input[type=number] { width:80px; }
+  button.btn { background:var(--red); color:#fff; border:0; cursor:pointer; font-weight:600; }
+  button.btn.sec { background:#fff; color:var(--red); border:1px solid var(--red); }
+  button.btn.sm { padding:5px 10px; font-size:13px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .tag { font-size:12px; padding:2px 8px; border-radius:99px; background:#eee; white-space:nowrap; }
+  .tag.ok { background:#e5f4e6; color:var(--ok); } .tag.bad { background:#fde8e8; color:var(--red-d); } .tag.warn { background:#fff1da; color:var(--warn); }
+  .mute { color:var(--mute); font-size:13px; }
+  .msg { padding:9px 12px; border-radius:8px; margin:8px 0; font-size:14px; background:#e5f4e6; color:var(--ok); }
+  .msg.err { background:#fde8e8; color:var(--red-d); }
+  .bar { height:10px; background:var(--red); border-radius:5px; min-width:2px; }
+  .bar.g { background:var(--ok); }
+  .login { max-width:360px; margin:60px auto; }
+  .login input { width:100%; margin-bottom:10px; }
+  label.ck { display:inline-flex; gap:4px; align-items:center; margin-right:10px; font-size:13px; }
+  .slotname { background:#faf0ef; font-weight:700; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
