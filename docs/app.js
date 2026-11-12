@@ -24,7 +24,10 @@
   const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['บริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const render = (html) => { app.innerHTML = html; window.scrollTo(0, 0); };
   const loading = (t = 'กำลังโหลด...') => render(`<div class="center">${esc(t)}</div>`);
-  const showErr = (m) => { const e = document.getElementById('err'); if (e) e.innerHTML = `<div class="err">${esc(m)}</div>`; };
+  const todayBkk = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  // แสดงข้อผิดพลาด (ถ้ามีรายละเอียดทางเทคนิคจากเซิร์ฟเวอร์ จะแสดงตัวเล็กสีเทา ช่วยให้ถ่ายภาพส่งมาวินิจฉัยได้)
+  const errHtml = (e) => `<div class="err">${esc(e.message || e)}${e.detail ? `<br><small style="opacity:.7">รายละเอียด: ${esc(e.detail)}</small>` : ''}</div>`;
+  const showErr = (m) => { const e = document.getElementById('err'); if (e) e.innerHTML = typeof m === 'string' ? `<div class="err">${esc(m)}</div>` : errHtml(m); };
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
 
   async function api(action, payload = {}) {
@@ -36,7 +39,7 @@
     const data = await res.json().catch(() => ({}));
     // LINE ID Token หมดอายุ (อายุประมาณ 1 ชม.) -> ล็อกอินใหม่อัตโนมัติ
     if (res.status === 401) { liff.logout(); location.reload(); throw new Error('เซสชันหมดอายุ กำลังเข้าสู่ระบบใหม่...'); }
-    if (!res.ok) throw Object.assign(new Error(data.message || 'เกิดข้อผิดพลาด'), { code: data.error });
+    if (!res.ok) throw Object.assign(new Error(data.message || 'เกิดข้อผิดพลาด'), { code: data.error, detail: data.detail });
     return data;
   }
 
@@ -49,7 +52,7 @@
       await refreshMe();
       state.me.consented ? home() : consent();
     } catch (e) {
-      render(`<div class="card"><h2>เปิดระบบไม่สำเร็จ</h2><p class="mute">${esc(e.message)}</p><button onclick="location.reload()">ลองใหม่</button></div>`);
+      render(`<div class="card"><h2>เปิดระบบไม่สำเร็จ</h2>${errHtml(e)}<button onclick="location.reload()">ลองใหม่</button></div>`);
     }
   }
   async function refreshMe() { state.me = await api('me'); }
@@ -244,12 +247,22 @@
             : '<p class="mute">ยังไม่มีประวัติการบริจาค</p>'}
           <p class="mute">จำนวนครั้งที่บริจาค: ${h.donations.length}</p></div>
         <div class="card"><h2>ประวัติการจอง</h2>
-          ${h.bookings.length ? h.bookings.map((b) => { const [t, c] = STATUS[b.status] || [b.status, '']; return `<p>${esc(fmtDate(b.booking_date, { day: 'numeric', month: 'short', year: 'numeric' }))} ${esc(b.time_slots?.label)} น. <span class="tag ${c}">${t}</span></p>`; }).join('')
-            : '<p class="mute">ยังไม่มีการจอง</p>'}</div>
+          ${h.bookings.length ? h.bookings.map((b) => {
+              const [t, c] = STATUS[b.status] || [b.status, ''];
+              const canCancel = b.status === 'pending' && b.booking_date >= todayBkk();
+              return `<p>${esc(fmtDate(b.booking_date, { day: 'numeric', month: 'short', year: 'numeric' }))} ${esc(b.time_slots?.label)} น. <span class="tag ${c}">${t}</span>
+                ${canCancel ? `<br><button class="secondary" data-cancel="${esc(b.id)}" style="margin-top:6px;padding:9px;font-size:14px">ยกเลิกคิวนี้</button>` : ''}</p>`;
+            }).join('')
+            : '<p class="mute">ยังไม่มีการจอง</p>'}
+          <div id="err"></div></div>
         <button id="home" class="secondary">กลับหน้าแรก</button>`);
-      on('home', home);
+      on('home', async () => { await refreshMe(); home(); });
+      document.querySelectorAll('[data-cancel]').forEach((btn) => btn.addEventListener('click', async () => {
+        if (!confirm('ยืนยันยกเลิกคิวนี้?')) return;
+        try { await api('cancel', { booking_id: btn.dataset.cancel }); await refreshMe(); history(); } catch (e) { showErr(e); }
+      }));
       document.querySelectorAll('[data-cert]').forEach((b) => b.addEventListener('click', () => certificate(b.dataset.cert)));
-    } catch (e) { render(`<div class="card"><div class="err">${esc(e.message)}</div><button id="home">กลับ</button></div>`); on('home', home); }
+    } catch (e) { render(`<div class="card">${errHtml(e)}<button id="home">กลับ</button></div>`); on('home', home); }
   }
 
   // ---------- ใบเกียรติบัตร PDF ----------
