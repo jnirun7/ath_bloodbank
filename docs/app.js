@@ -168,39 +168,88 @@
     on('home', async () => { await refreshMe(); home(); });
   }
 
-  // ---------- 3) เลือกคิว ----------
+  // ---------- 3) เลือกคิว: ปฏิทินรายเดือน ----------
+  // จุดเขียว = ว่างให้จอง · จุดแดง = เต็ม · จุดส้ม/พื้นส้ม = วันหยุด · เทา = เสาร์-อาทิตย์/ปิดรับ
+  const DOW = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+  const monthLabel = (ym) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+  const shiftMonth = (ym, n) => { const d = new Date(`${ym}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7); };
+
   async function slots() {
-    loading('กำลังโหลดตารางคิว...');
-    try { state.slots = (await api('availability', { days: 30 })).slots; } catch (e) { return render(`<div class="card"><div class="err">${esc(e.message)}</div><button id="b">กลับ</button></div>`), on('b', home); }
+    loading('กำลังโหลดปฏิทินคิว...');
+    try {
+      const c = await api('calendar');
+      state.slots = c.slots; state.today = c.today; state.maxDate = c.to;
+      state.holidays = Object.fromEntries(c.holidays.map((h) => [h.holiday_date, h.name]));
+    } catch (e) { render(`<div class="card">${errHtml(e)}<button id="b">กลับ</button></div>`); return on('b', home); }
     state.selDate = state.selSlot = null;
+    state.month = state.today.slice(0, 7);
     drawSlots();
   }
 
+  // สถานะของแต่ละวัน
+  function dayInfo(d) {
+    if (d < state.today || d > state.maxDate) return { s: 'out' };
+    if (state.holidays[d]) return { s: 'holiday', name: state.holidays[d] };
+    const dow = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (dow === 0 || dow === 6) return { s: 'weekend' };
+    const list = state.slots.filter((x) => x.slot_date === d);
+    if (!list.length) return { s: 'none' };                      // ช่วงเวลาของวันนี้ผ่านไปหมดแล้ว/ไม่เปิดรับ
+    return list.some((x) => x.available > 0) ? { s: 'open' } : { s: 'full' };
+  }
+
   function drawSlots() {
-    const dates = [...new Set(state.slots.map((s) => s.slot_date))];
-    const sel = state.selDate && dates.includes(state.selDate) ? state.selDate : dates[0];
-    state.selDate = sel;
-    const daySlots = state.slots.filter((s) => s.slot_date === sel);
+    const ym = state.month, [Y, M] = ym.split('-').map(Number);
+    const first = new Date(Date.UTC(Y, M - 1, 1)).getUTCDay();
+    const daysIn = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+    const minM = state.today.slice(0, 7), maxM = state.maxDate.slice(0, 7);
+
+    let cells = DOW.map((x, i) => `<div class="cal-dow ${i === 0 || i === 6 ? 'we' : ''}">${x}</div>`).join('');
+    cells += '<div></div>'.repeat(first);
+    for (let n = 1; n <= daysIn; n++) {
+      const d = `${ym}-${String(n).padStart(2, '0')}`, info = dayInfo(d);
+      const clickable = ['open', 'full', 'holiday'].includes(info.s);
+      const dot = info.s === 'open' ? 'g' : info.s === 'full' ? 'r' : info.s === 'holiday' ? 'o' : '';
+      cells += `<button class="cd s-${info.s} ${d === state.today ? 'today' : ''} ${d === state.selDate ? 'sel' : ''}" data-d="${d}" ${clickable ? '' : 'disabled'}
+        aria-label="${esc(longDate(d))}${info.s === 'open' ? ' ว่าง' : info.s === 'full' ? ' เต็ม' : info.s === 'holiday' ? ' วันหยุด ' + esc(info.name) : ''}">
+        <span class="n">${n}</span>${dot ? `<i class="dot ${dot}"></i>` : ''}</button>`;
+    }
+
+    // รายชื่อวันหยุดของเดือนที่กำลังดู
+    const monthHolidays = Object.entries(state.holidays).filter(([d]) => d.startsWith(ym));
+    // ส่วนรายละเอียดของวันที่เลือก
+    let panel = '<p class="mute" style="text-align:center">แตะวันที่มี <b style="color:#2e9e4f">จุดสีเขียว</b> เพื่อเลือกช่วงเวลา</p>';
+    if (state.selDate) {
+      const info = dayInfo(state.selDate), day = state.slots.filter((s) => s.slot_date === state.selDate);
+      if (info.s === 'holiday') panel = `<div class="holbox">🟠 <b>${esc(longDate(state.selDate))}</b><br>วันหยุด: ${esc(info.name)} — ไม่เปิดรับบริจาค</div>`;
+      else if (info.s === 'full') panel = `<div class="fullbox"><b>${esc(longDate(state.selDate))}</b><br>คิวเต็มทุกช่วงเวลาแล้ว กรุณาเลือกวันอื่น</div>`;
+      else panel = `<p><b>${esc(longDate(state.selDate))}</b></p>` + ['morning', 'afternoon'].map((p) => {
+        const list = day.filter((s) => s.period === p);
+        return list.length ? `<p class="mute" style="margin:8px 0 0"><b>${p === 'morning' ? 'ช่วงเช้า' : 'ช่วงบ่าย'}</b></p>` + list.map((s) => `
+          <button class="slot ${state.selSlot === s.slot_id ? 'sel' : ''}" data-s="${s.slot_id}" ${s.available < 1 ? 'disabled' : ''}>
+            <span>${esc(s.label)} น.</span>
+            <span class="tag ${s.available < 1 ? 'bad' : 'ok'}">${s.available < 1 ? 'เต็ม' : `ว่าง ${s.available}`}</span></button>`).join('') : '';
+      }).join('');
+    }
+
     render(`
       <div class="card">
         <h2>เลือกวันและเวลา</h2>
-        ${dates.length ? `
-          <div class="dates">${dates.map((d) => `<button class="date ${d === sel ? 'sel' : ''}" data-d="${d}">
-              ${esc(fmtDate(d, { weekday: 'short' }))}<b>${esc(fmtDate(d, { day: 'numeric' }))}</b>${esc(fmtDate(d, { month: 'short' }))}</button>`).join('')}</div>
-          <p class="mute">${esc(longDate(sel))}</p>
-          ${['morning', 'afternoon'].map((p) => {
-            const list = daySlots.filter((s) => s.period === p);
-            return list.length ? `<p><b>${p === 'morning' ? 'ช่วงเช้า' : 'ช่วงบ่าย'}</b></p>` + list.map((s) => `
-              <button class="slot ${state.selSlot === s.slot_id ? 'sel' : ''}" data-s="${s.slot_id}" ${s.available < 1 ? 'disabled' : ''}>
-                <span>${esc(s.label)} น.</span>
-                <span class="tag ${s.available < 1 ? 'bad' : 'ok'}">${s.available < 1 ? 'เต็ม' : `ว่าง ${s.available}`}</span></button>`).join('') : '';
-          }).join('')}`
-        : '<p class="mute">ขณะนี้ยังไม่มีคิวว่างใน 30 วันข้างหน้า</p>'}
+        <div class="cal-head">
+          <button class="cal-nav" id="pm" ${ym <= minM ? 'disabled' : ''} aria-label="เดือนก่อน">‹</button>
+          <b>${esc(monthLabel(ym))}</b>
+          <button class="cal-nav" id="nm" ${ym >= maxM ? 'disabled' : ''} aria-label="เดือนถัดไป">›</button>
+        </div>
+        <div class="cal-grid">${cells}</div>
+        <div class="legend"><span><i class="dot g"></i>ว่างให้จอง</span><span><i class="dot r"></i>เต็ม</span><span><i class="dot o"></i>วันหยุด</span><span><i class="dot x"></i>ปิดรับ (เสาร์-อาทิตย์/ผ่านแล้ว)</span></div>
+        ${monthHolidays.length ? `<div class="holnote">วันหยุดเดือนนี้: ${monthHolidays.map(([d, n]) => `${esc(fmtDate(d, { day: 'numeric' }))} ${esc(n)}`).join(' · ')}</div>` : ''}
+        <div class="slotpanel">${panel}</div>
         <div id="err"></div>
         <button id="confirm" ${state.selSlot ? '' : 'disabled'}>ถัดไป: ยืนยันการจอง</button>
         <button id="back" class="link">กลับ</button>
       </div>`);
-    document.querySelectorAll('.date').forEach((b) => b.addEventListener('click', () => { state.selDate = b.dataset.d; state.selSlot = null; drawSlots(); }));
+    on('pm', () => { state.month = shiftMonth(ym, -1); drawSlots(); });
+    on('nm', () => { state.month = shiftMonth(ym, 1); drawSlots(); });
+    document.querySelectorAll('.cd:not([disabled])').forEach((b) => b.addEventListener('click', () => { state.selDate = b.dataset.d; state.selSlot = null; drawSlots(); }));
     document.querySelectorAll('.slot').forEach((b) => b.addEventListener('click', () => { state.selSlot = Number(b.dataset.s); drawSlots(); }));
     on('back', home);
     on('confirm', confirmBooking);

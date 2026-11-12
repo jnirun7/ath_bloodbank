@@ -37,12 +37,37 @@
   .login input { width:100%; margin-bottom:10px; }
   label.ck { display:inline-flex; gap:4px; align-items:center; margin-right:10px; font-size:13px; }
   .slotname { background:#faf0ef; font-weight:700; }
+  /* --- มุมมองรายสัปดาห์ --- */
+  .wkwrap { overflow-x:auto; }
+  table.wk { min-width:760px; table-layout:fixed; }
+  table.wk th, table.wk td { border:1px solid var(--line); vertical-align:top; padding:6px 7px; font-size:13px; }
+  table.wk th.slt { width:110px; background:#faf6f5; white-space:nowrap; }
+  table.wk th a { color:var(--red); text-decoration:none; font-weight:700; }
+  table.wk th.today { background:#fdecec; } table.wk td.today { box-shadow:inset 0 0 0 2px var(--red); }
+  table.wk .cnt { font-weight:700; margin-bottom:3px; }
+  table.wk td.empty { background:#f1f8f2; color:#6b8f6e; } table.wk td.some { background:#fff8e6; } table.wk td.full { background:#fde8e8; }
+  table.wk td.hol, table.wk th.hol { background:#fff1da; color:var(--warn); text-align:center; }
+  table.wk td.off { background:#f3f0ef; color:#aaa; text-align:center; }
+  table.wk tr.tot td { background:#faf6f5; text-align:center; }
+  .nm { font-size:12px; line-height:1.35; padding:1px 0; } .nm.completed { color:var(--ok); } .nm.no_show { color:#999; text-decoration:line-through; }
+  .lg { display:inline-block; width:12px; height:12px; border:1px solid var(--line); border-radius:3px; margin:0 3px 0 8px; vertical-align:-2px; }
+  .lg.full { background:#fde8e8; } .lg.some { background:#fff8e6; } .lg.empty { background:#f1f8f2; } .lg.hol { background:#fff1da; }
+  /* --- สถิติ --- */
+  .kpis { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin:6px 0 4px; }
+  .kpi { border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; background:#faf6f5; }
+  .kpi .kv { font-size:28px; font-weight:700; color:var(--red); line-height:1.1; } .kpi .kl { font-size:13px; color:var(--mute); margin-top:2px; }
+  .kpi.ok .kv { color:var(--ok); } .kpi.bad .kv { color:var(--red-d); } .kpi.warn .kv { color:var(--warn); }
+  .tblwrap { overflow-x:auto; }
+  @media (max-width:560px) { .kpis { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  /* --- สวิตช์ตั้งค่า --- */
+  label.sw { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); cursor:pointer; }
+  label.sw:first-of-type { border-top:0; } label.sw input { margin-top:4px; width:18px; height:18px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=3"></script>
-<script src="admin.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="admin.js?v=4"></script>
 </body>
 </html>

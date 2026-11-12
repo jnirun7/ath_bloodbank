@@ -6,9 +6,9 @@
   const sb = supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY);
   const root = document.getElementById('root');
 
-  const S = { me: null, tab: 'bookings', date: bkkToday(), year: new Date().getFullYear() };
+  const S = { me: null, tab: 'bookings', view: 'week', date: bkkToday(), year: new Date().getFullYear() };
   const TABS = [['bookings', 'รายการจอง'], ['holidays', 'วันหยุด'], ['slots', 'ช่วงเวลา/ขีดจำกัดคิว'],
-                ['stats', 'สถิติ'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)']];
+                ['stats', 'สถิติ'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
   const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['มาบริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const EVENTS = [['booking_created', 'จองใหม่'], ['booking_cancelled', 'ยกเลิกจอง'], ['daily_summary', 'สรุปนัดพรุ่งนี้']];
 
@@ -49,47 +49,142 @@
   }
 
   function shell() {
-    const tabs = TABS.filter(([k]) => k !== 'channels' || S.me.role === 'admin');
+    const tabs = TABS.filter(([k]) => !['channels', 'settings'].includes(k) || S.me.role === 'admin');
     root.innerHTML = `
       <header><div><b>🩸 ธนาคารเลือด รพ.อ่างทอง</b><br><small>${esc(S.me.display_name)} (${S.me.role === 'admin' ? 'ผู้ดูแล' : 'เจ้าหน้าที่'})</small></div>
-        <button class="btn sec sm" id="out" style="background:#fff">ออกจากระบบ</button></header>
+        <button class="btn sec sm" id="logoutbtn" style="background:#fff">ออกจากระบบ</button></header>
       <nav>${tabs.map(([k, t]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${t}</button>`).join('')}</nav>
       <main><div id="msg"></div><div id="view"></div></main>`;
-    $('out').onclick = async () => { await sb.auth.signOut(); loginView(); };
+    $('logoutbtn').onclick = async () => { await sb.auth.signOut(); loginView(); };
     document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; shell(); }));
-    ({ bookings, holidays, slots, stats, search, channels })[S.tab]();
+    ({ bookings, holidays, slots, stats, search, channels, settings })[S.tab]();
   }
 
-  // ---------- 1) รายการจอง + อัปเดตสถานะ ----------
-  async function bookings() {
-    $('view').innerHTML = `<div class="card"><h2>รายการจอง</h2>
-      <div class="row"><input type="date" id="d" value="${S.date}">
+  // ---------- 1) รายการจอง: รายสัปดาห์ (ภาพรวม) / รายวัน (เปลี่ยนสถานะ) ----------
+  const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const mondayOf = (iso) => addDays(iso, -((new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7));
+  const ACTIVE = ['pending', 'completed'];                 // นับเป็นคิวที่ใช้ที่นั่งจริง (เหมือนกติกาจองในฐานข้อมูล)
+
+  // ดึงชื่อผู้ใช้แยกคำสั่ง (ไม่ใช้การ join ในคำสั่งเดียว)
+  async function loadUsers(rows) {
+    const ids = [...new Set(rows.map((r) => r.user_id))];
+    if (!ids.length) return new Map();
+    const { data, error } = await sb.from('users').select('id, full_name, phone, display_name').in('id', ids);
+    if (error) throw error;
+    return new Map(data.map((u) => [u.id, u]));
+  }
+
+  function bookings() {
+    S.view = S.view || 'week';
+    $('view').innerHTML = `<div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0;flex:1">รายการจอง</h2>
+        <button class="btn sm ${S.view === 'week' ? '' : 'sec'}" id="vw">รายสัปดาห์</button>
+        <button class="btn sm ${S.view === 'day' ? '' : 'sec'}" id="vd">รายวัน</button></div>
+      <div id="bk"></div></div>`;
+    $('vw').onclick = () => { S.view = 'week'; bookings(); };
+    $('vd').onclick = () => { S.view = 'day'; bookings(); };
+    (S.view === 'week' ? weekView : dayView)().catch(fail);
+  }
+
+  async function weekView() {
+    const mon = mondayOf(S.date), fri = addDays(mon, 4);
+    const days = [0, 1, 2, 3, 4].map((n) => addDays(mon, n));
+    $('bk').innerHTML = `<div class="row">
+        <button class="btn sec sm" id="pw">◀ สัปดาห์ก่อน</button>
+        <b id="wtitle" style="min-width:210px;text-align:center"></b>
+        <button class="btn sec sm" id="nw">สัปดาห์ถัดไป ▶</button>
+        <button class="btn sec sm" id="tw">สัปดาห์นี้</button>
+        <input type="date" id="jd" value="${S.date}" title="ไปยังสัปดาห์ที่มีวันที่นี้"></div>
+      <div id="wk" class="mute">กำลังโหลด...</div>`;
+    $('pw').onclick = () => { S.date = addDays(mon, -7); bookings(); };
+    $('nw').onclick = () => { S.date = addDays(mon, 7); bookings(); };
+    $('tw').onclick = () => { S.date = bkkToday(); bookings(); };
+    $('jd').onchange = () => { if ($('jd').value) { S.date = $('jd').value; bookings(); } };
+    $('wtitle').textContent = `${fmt(mon, { day: 'numeric', month: 'short' })} - ${fmt(fri, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+
+    const [slotsR, bkR, holR] = await Promise.all([
+      sb.from('time_slots').select('id, label, max_capacity, is_active, start_time').order('start_time'),
+      sb.from('bookings').select('id, user_id, booking_date, time_slot_id, status').gte('booking_date', mon).lte('booking_date', fri),
+      sb.from('hospital_holidays').select('holiday_date, name').gte('holiday_date', mon).lte('holiday_date', fri),
+    ]);
+    for (const r of [slotsR, bkR, holR]) if (r.error) throw r.error;
+    const users = await loadUsers(bkR.data);
+    const hol = Object.fromEntries(holR.data.map((h) => [h.holiday_date, h.name]));
+    const today = bkkToday();
+    const nameOf = (b) => users.get(b.user_id)?.full_name || users.get(b.user_id)?.display_name || '(ไม่ระบุ)';
+
+    let html = '<div class="wkwrap"><table class="wk"><tr><th class="slt"></th>';
+    for (const d of days) {
+      html += `<th class="${d === today ? 'today' : ''} ${hol[d] ? 'hol' : ''}"><a href="#" data-day="${d}" title="ดู/เปลี่ยนสถานะรายวัน">${esc(fmt(d, { weekday: 'short' }))} ${esc(fmt(d, { day: 'numeric' }))}<br><small>${esc(fmt(d, { month: 'short' }))}</small></a>${hol[d] ? `<br><small>${esc(hol[d])}</small>` : ''}</th>`;
+    }
+    html += '</tr>';
+    const dayTotals = Object.fromEntries(days.map((d) => [d, { used: 0, cap: 0 }]));
+    for (const s of slotsR.data) {
+      html += `<tr><th class="slt">${esc(s.label)}${s.is_active ? '' : '<br><small>(ปิด)</small>'}</th>`;
+      for (const d of days) {
+        const list = bkR.data.filter((b) => b.booking_date === d && b.time_slot_id === s.id && b.status !== 'cancelled');
+        const used = list.filter((b) => ACTIVE.includes(b.status)).length;
+        if (hol[d]) {
+          // วันหยุดที่ยังมีคิวค้าง (จองไว้ก่อนเพิ่มวันหยุด) ต้องแสดงให้เจ้าหน้าที่เห็นและจัดการ
+          dayTotals[d].used += used;
+          html += list.length
+            ? `<td class="hol"><div class="cnt">⚠ ${used} คิวค้าง</div>${list.map((b) => `<div class="nm ${b.status}">${esc(nameOf(b))}</div>`).join('')}</td>`
+            : '<td class="hol">หยุด</td>';
+          continue;
+        }
+        if (!s.is_active) { html += '<td class="off">-</td>'; continue; }
+        dayTotals[d].used += used; dayTotals[d].cap += s.max_capacity;
+        const cls = used >= s.max_capacity ? 'full' : used > 0 ? 'some' : 'empty';
+        html += `<td class="${cls} ${d === today ? 'today' : ''}"><div class="cnt">${used}/${s.max_capacity}</div>` +
+          list.map((b) => `<div class="nm ${b.status}" title="${esc(STATUS[b.status][0])}">${esc(nameOf(b))}${b.status === 'completed' ? ' ✓' : b.status === 'no_show' ? ' ✗' : ''}</div>`).join('') + '</td>';
+      }
+      html += '</tr>';
+    }
+    html += '<tr class="tot"><th class="slt">รวมต่อวัน</th>' +
+      days.map((d) => (hol[d] ? `<td class="hol">${dayTotals[d].used ? '⚠ ' + dayTotals[d].used + ' คิวค้าง' : '-'}</td>` : `<td><b>${dayTotals[d].used}</b> / ${dayTotals[d].cap}</td>`)).join('') + '</tr></table></div>';
+
+    const usedAll = Object.values(dayTotals).reduce((a, t) => a + t.used, 0), capAll = Object.values(dayTotals).reduce((a, t) => a + t.cap, 0);
+    $('wk').className = '';
+    $('wk').innerHTML = `<p style="margin:4px 0 10px"><b>สัปดาห์นี้จอง ${usedAll} คิว</b> จากที่รับได้ ${capAll} คิว (ว่าง ${capAll - usedAll})</p>${html}
+      <p class="mute" style="margin-top:8px"><span class="lg full"></span>เต็ม <span class="lg some"></span>มีผู้จอง <span class="lg empty"></span>ว่าง <span class="lg hol"></span>วันหยุด
+      · ✓ = บริจาคสำเร็จ · ✗ = ไม่มา · คิวที่ยกเลิกไม่แสดง · กดที่หัววันเพื่อเปลี่ยนสถานะรายวัน</p>`;
+    document.querySelectorAll('[data-day]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); S.date = a.dataset.day; S.view = 'day'; bookings(); }));
+  }
+
+  async function dayView() {
+    $('bk').innerHTML = `<div class="row"><input type="date" id="d" value="${S.date}">
         <button class="btn sec sm" id="prev">◀ วันก่อน</button><button class="btn sec sm" id="next">วันถัดไป ▶</button>
         <button class="btn sec sm" id="today">วันนี้</button></div>
-      <div id="list" class="mute">กำลังโหลด...</div></div>`;
+      <div id="list" class="mute">กำลังโหลด...</div>`;
     $('d').onchange = () => { S.date = $('d').value; bookings(); };
-    const shift = (n) => { const d = new Date(S.date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); S.date = d.toISOString().slice(0, 10); bookings(); };
+    const shift = (n) => { S.date = addDays(S.date, n); bookings(); };
     $('prev').onclick = () => shift(-1); $('next').onclick = () => shift(1);
     $('today').onclick = () => { S.date = bkkToday(); bookings(); };
 
-    const { data, error } = await sb.from('bookings')
-      .select('id, status, time_slot_id, time_slots(label, start_time), users(full_name, phone, display_name)')
-      .eq('booking_date', S.date).order('time_slot_id');
-    if (error) return fail(error);
-    if (!data.length) { $('list').textContent = `ไม่มีรายการจองวัน${fmt(S.date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`; return; }
+    const [slotsR, bkR] = await Promise.all([
+      sb.from('time_slots').select('id, label').order('start_time'),
+      sb.from('bookings').select('id, user_id, status, time_slot_id').eq('booking_date', S.date),
+    ]);
+    for (const r of [slotsR, bkR]) if (r.error) throw r.error;
+    const longDate = fmt(S.date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    if (!bkR.data.length) { $('list').textContent = `ไม่มีรายการจองวัน${longDate}`; return; }
+    const users = await loadUsers(bkR.data);
 
-    const counts = data.reduce((a, b) => (a[b.status] = (a[b.status] || 0) + 1, a), {});
-    let html = `<p class="mute">${fmt(S.date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · รวม ${data.length} คิว
+    const counts = bkR.data.reduce((a, b) => (a[b.status] = (a[b.status] || 0) + 1, a), {});
+    let html = `<p class="mute">${esc(longDate)} · รวม ${bkR.data.length} คิว
       (รอ ${counts.pending || 0} · สำเร็จ ${counts.completed || 0} · ไม่มา ${counts.no_show || 0} · ยกเลิก ${counts.cancelled || 0})</p>
       <table><tr><th>ชื่อ-นามสกุล</th><th>เบอร์โทร</th><th>สถานะ</th><th>เปลี่ยนสถานะ</th></tr>`;
-    let last = null;
-    for (const b of data) {
-      if (b.time_slots?.label !== last) { last = b.time_slots?.label; html += `<tr><td colspan="4" class="slotname">${esc(last)} น.</td></tr>`; }
-      const [t, c] = STATUS[b.status];
-      html += `<tr><td>${esc(b.users?.full_name || b.users?.display_name || '(ไม่ระบุ)')}</td><td>${esc(b.users?.phone || '-')}</td>
-        <td><span class="tag ${c}">${t}</span></td>
-        <td><select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
+    for (const s of slotsR.data) {
+      const list = bkR.data.filter((b) => b.time_slot_id === s.id);
+      if (!list.length) continue;
+      html += `<tr><td colspan="4" class="slotname">${esc(s.label)} น.</td></tr>`;
+      for (const b of list) {
+        const u = users.get(b.user_id); const [t, c] = STATUS[b.status];
+        html += `<tr><td>${esc(u?.full_name || u?.display_name || '(ไม่ระบุ)')}</td><td>${esc(u?.phone || '-')}</td>
+          <td><span class="tag ${c}">${t}</span></td>
+          <td><select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
+      }
     }
+    $('list').className = '';
     $('list').innerHTML = html + '</table>';
     document.querySelectorAll('#list select').forEach((sel) => (sel.onchange = async () => {
       if (sel.value === 'completed' && !confirm('ยืนยัน "มาบริจาคสำเร็จ"? ระบบจะสร้างประวัติและเลขใบเกียรติบัตรให้ผู้บริจาค')) { sel.value = sel.dataset.cur; return; }
@@ -145,21 +240,25 @@
   // ---------- 4) สถิติ ----------
   async function stats() {
     $('view').innerHTML = `<div class="card"><h2>สถิติการจองและการบริจาค</h2>
-      <div class="row"><label>ปี (ค.ศ.) <input type="number" id="y" value="${S.year}" min="2020" max="2100"></label>
-        <button class="btn sec sm" id="all">ทุกปี</button><button class="btn sm" id="go">ดู</button></div>
-      <div id="out" class="mute">กำลังโหลด...</div></div>`;
-    $('go').onclick = () => { S.year = Number($('y').value); stats(); };
-    $('all').onclick = () => { S.year = null; stats(); };
+      <div class="row"><label>ปี (ค.ศ.) <input type="number" id="y" value="${S.year ?? ''}" min="2020" max="2100" placeholder="ทุกปี"></label>
+        <button class="btn sec sm" id="allyears">ทุกปี</button><button class="btn sm" id="showstats">ดู</button></div>
+      <div id="statsbox" class="mute">กำลังโหลด...</div></div>`;
+    $('showstats').onclick = () => { S.year = Number($('y').value) || null; stats(); };
+    $('allyears').onclick = () => { S.year = null; stats(); };
     const { data, error } = await sb.rpc('stats_monthly', { p_year: S.year });
     if (error) return fail(error);
-    if (!data.length) { $('out').textContent = 'ไม่มีข้อมูลในช่วงที่เลือก'; return; }
+    const box = $('statsbox'); box.className = '';
+    if (!data.length) { box.innerHTML = '<p class="mute">ไม่มีข้อมูลในช่วงที่เลือก</p>'; return; }
     const max = Math.max(...data.map((r) => r.booked), 1);
     const tot = data.reduce((a, r) => ({ b: a.b + r.booked, c: a.c + r.completed, x: a.x + r.cancelled, n: a.n + r.no_show }), { b: 0, c: 0, x: 0, n: 0 });
-    $('out').innerHTML = `<p><b>รวม:</b> จอง ${tot.b} · มาบริจาคสำเร็จ ${tot.c} · ยกเลิก ${tot.x} · ไม่มา ${tot.n}</p>
-      <table><tr><th>เดือน</th><th>จอง</th><th>บริจาคสำเร็จ</th><th>ยกเลิก</th><th>ไม่มา</th><th style="width:30%"></th></tr>
+    const tile = (label, v, cls) => `<div class="kpi ${cls}"><div class="kv">${v}</div><div class="kl">${label}</div></div>`;
+    box.innerHTML = `
+      <div class="kpis">${tile('จองทั้งหมด', tot.b, '')}${tile('บริจาคสำเร็จ', tot.c, 'ok')}${tile('ยกเลิก', tot.x, 'bad')}${tile('ไม่มา', tot.n, 'warn')}</div>
+      <h3>แยกรายเดือน</h3>
+      <div class="tblwrap"><table><tr><th>เดือน</th><th>จอง</th><th>บริจาคสำเร็จ</th><th>ยกเลิก</th><th>ไม่มา</th><th style="min-width:140px">กราฟ</th></tr>
       ${data.map((r) => `<tr><td>${esc(fmt(r.month, { month: 'long', year: 'numeric' }))}</td><td>${r.booked}</td><td>${r.completed}</td><td>${r.cancelled}</td><td>${r.no_show}</td>
-        <td><div class="bar" style="width:${(r.booked / max) * 100}%"></div><div class="bar g" style="width:${(r.completed / max) * 100}%;margin-top:2px"></div></td></tr>`).join('')}</table>
-      <p class="mute">แถบแดง = จอง · แถบเขียว = บริจาคสำเร็จ</p>`;
+        <td><div class="bar" style="width:${(r.booked / max) * 100}%"></div><div class="bar g" style="width:${(r.completed / max) * 100}%;margin-top:2px"></div></td></tr>`).join('')}</table></div>
+      <p class="mute" style="margin-top:8px">แถบแดง = จอง · แถบเขียว = บริจาคสำเร็จ</p>`;
   }
 
   // ---------- 5) ค้นหาผู้บริจาค ----------
@@ -250,6 +349,31 @@
       } catch (e) { fail(e); }
       b.disabled = false;
     }));
+  }
+
+  // ---------- 7) ตั้งค่าการแจ้งเตือนผู้บริจาคทาง LINE (เฉพาะ admin) ----------
+  // ข้อความ push ทุกข้อความหักโควตา LINE OA จึงเปิด/ปิดแยกได้ (การแจ้งเจ้าหน้าที่ผ่านหมอพร้อมไม่เกี่ยวกับโควตานี้)
+  const DONOR_NOTIFY = [
+    ['notify_booking_confirm', true,  'ข้อความยืนยันเมื่อจองสำเร็จ', 'ส่ง 1 ข้อความต่อการจอง · แนะนำให้เปิด'],
+    ['notify_cancel_confirm',  false, 'ข้อความยืนยันเมื่อผู้บริจาคยกเลิกคิวเอง', 'ผู้บริจาคเห็นผลบนหน้าจอ LIFF อยู่แล้ว จึงมักไม่จำเป็น'],
+    ['notify_reminder',        false, 'เตือนล่วงหน้า 1 วันก่อนนัด', 'ช่วยลดคนไม่มาตามนัด แต่ใช้ 1 ข้อความต่อคิว'],
+    ['notify_status_change',   false, 'แจ้งเมื่อเจ้าหน้าที่เปลี่ยนสถานะ (สำเร็จ / ยกเลิก / ไม่มา)', 'ผู้บริจาคดูสถานะได้เองในหน้า LIFF > ประวัติ'],
+  ];
+  async function settings() {
+    const { data, error } = await sb.from('app_settings').select('key, value');
+    if (error) return fail({ message: 'อ่านการตั้งค่าไม่ได้ — ยังไม่ได้รันไฟล์ settings.sql ใน Supabase หรือไม่? (' + error.message + ')' });
+    const cur = Object.fromEntries(data.map((r) => [r.key, r.value === 'true']));
+    $('view').innerHTML = `<div class="card"><h2>ตั้งค่าการแจ้งเตือนผู้บริจาคทาง LINE</h2>
+      <p class="mute">ทุกข้อความที่ระบบ "ส่ง" (push) หาผู้บริจาคจะหักโควตาข้อความของ LINE OA ตามแพ็กเกจของคุณ — เปิดเฉพาะที่จำเป็น
+      (ตรวจโควตาที่เหลือได้ใน LINE OA Manager) · การแจ้งเจ้าหน้าที่ผ่านหมอพร้อมไม่ใช้โควตานี้และไม่ได้รับผลจากหน้านี้</p>
+      ${DONOR_NOTIFY.map(([k, def, label, hint]) => `<label class="sw"><input type="checkbox" data-key="${k}" ${(k in cur ? cur[k] : def) ? 'checked' : ''}>
+        <span><b>${esc(label)}</b><br><small class="mute">${esc(hint)}</small></span></label>`).join('')}
+      <div class="row" style="margin-top:12px"><button class="btn" id="savesettings">บันทึกการตั้งค่า</button></div></div>`;
+    $('savesettings').onclick = async () => {
+      const rows = [...document.querySelectorAll('[data-key]')].map((c) => ({ key: c.dataset.key, value: c.checked ? 'true' : 'false' }));
+      const { error: e } = await sb.from('app_settings').upsert(rows, { onConflict: 'key' });
+      e ? fail(e) : msg('บันทึกแล้ว (มีผลทันที)');
+    };
   }
 
   boot();
