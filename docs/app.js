@@ -50,35 +50,92 @@
       if (!liff.isLoggedIn()) { liff.login(); return; }
       try { state.friend = (await liff.getFriendship()).friendFlag; } catch { state.friend = true; }
       await refreshMe();
-      state.me.consented ? home() : consent();
+      !state.me.consented ? consent() : !state.me.profile_complete ? profileForm(true) : home();
     } catch (e) {
       render(`<div class="card"><h2>เปิดระบบไม่สำเร็จ</h2>${errHtml(e)}<button onclick="location.reload()">ลองใหม่</button></div>`);
     }
   }
   async function refreshMe() { state.me = await api('me'); }
 
-  // ---------- 1) ยินยอม PDPA ----------
-  function consent() {
+  // ---------- 1) ข้อมูลส่วนตัว + ยินยอม PDPA ----------
+  // กรอกครั้งเดียว: ชื่อ-นามสกุล, เลขบัตรประชาชน (ตรวจเลขให้ทันที), วันเกิด (เลือก วัน/เดือน/ปี พ.ศ. คำนวณอายุให้), เพศ, เบอร์โทร
+  const MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const cidValid = (c) => { if (!/^\d{13}$/.test(c)) return false; let t = 0; for (let i = 0; i < 12; i++) t += Number(c[i]) * (13 - i); return (11 - (t % 11)) % 10 === Number(c[12]); };
+  const cidFormat = (d) => [d.slice(0, 1), d.slice(1, 5), d.slice(5, 10), d.slice(10, 12), d.slice(12, 13)].filter(Boolean).join('-');
+  const ageFrom = (iso, on) => { const [by, bm, bd] = iso.split('-').map(Number), [oy, om, od] = on.split('-').map(Number); return oy - by - (om < bm || (om === bm && od < bd) ? 1 : 0); };
+
+  function consent() { profileForm(false); }
+
+  function profileForm(existing) {
+    const me = state.me || {};
+    const [first, ...rest] = String(me.full_name || '').split(' ');
+    const by0 = new Date().getUTCFullYear() + 543, bd = me.birth_date ? me.birth_date.split('-').map(Number) : [0, 0, 0];
+    const opts = (arr, sel, ph) => `<option value="">${ph}</option>` + arr.map(([v, t]) => `<option value="${v}" ${String(v) === String(sel) ? 'selected' : ''}>${t}</option>`).join('');
+    const days = Array.from({ length: 31 }, (_, i) => [i + 1, i + 1]);
+    const months = MONTHS.map((m, i) => [i + 1, m]);
+    const years = Array.from({ length: 80 }, (_, i) => [by0 - 15 - i - 543, by0 - 15 - i]);   // value = ค.ศ., แสดง = พ.ศ. (อายุ 15-94 ปี)
     render(`
       <div class="card">
-        <h2>นโยบายความเป็นส่วนตัว (PDPA)</h2>
-        <p>โรงพยาบาลอ่างทองเก็บข้อมูลของคุณเท่าที่จำเป็น ได้แก่ LINE User ID ชื่อ-นามสกุล เบอร์โทร (ถ้ากรอก) ข้อมูลการจองคิว ผลคัดกรองเพียง "ผ่าน/ไม่ผ่าน" และประวัติการบริจาค
-        เพื่อใช้จองคิว แจ้งเตือน และออกใบเกียรติบัตรเท่านั้น</p>
-        <p>ระบบ<b>ไม่เก็บ</b>คำตอบด้านสุขภาพรายข้อ คุณขอถอนความยินยอมและลบข้อมูลได้ทุกเมื่อที่เมนู "ข้อมูลส่วนตัว"</p>
+        <h2>${existing ? 'กรุณากรอกข้อมูลเพิ่มเติม' : 'ข้อมูลผู้บริจาค'}</h2>
+        <p class="mute">${existing ? 'ระบบเพิ่มการเก็บเลขบัตรประชาชนและวันเกิด เพื่อยืนยันตัวตน คำนวณอายุ และเตรียมบันทึกประวัติผู้บริจาค — กรอกครั้งเดียว ครั้งต่อไปไม่ต้องกรอกอีก' : 'กรอกครั้งเดียว ครั้งต่อไปไม่ต้องกรอกอีก ใช้เวลาประมาณ 1 นาที'}</p>
+        <label for="fn">ชื่อ</label><input id="fn" type="text" autocomplete="given-name" value="${esc(first || '')}">
+        <label for="ln">นามสกุล</label><input id="ln" type="text" autocomplete="family-name" value="${esc(rest.join(' '))}">
+        <label for="cid">เลขบัตรประชาชน 13 หลัก</label>
+        <input id="cid" type="text" inputmode="numeric" autocomplete="off" maxlength="17" placeholder="เช่น 1-2345-67890-12-3">
+        <div id="cidh" class="mute"></div>
+        <label>วันเกิด</label>
+        <div class="dob">
+          <select id="bd" aria-label="วัน">${opts(days, bd[2], 'วัน')}</select>
+          <select id="bm" aria-label="เดือน">${opts(months, bd[1], 'เดือน')}</select>
+          <select id="by" aria-label="ปี พ.ศ.">${opts(years, bd[0], 'ปี พ.ศ.')}</select></div>
+        <div id="ageh" class="mute"></div>
+        <label>เพศ</label>
+        <div class="opts" style="margin-top:0">
+          <label><input type="radio" name="g" value="male" ${me.gender === 'male' ? 'checked' : ''}><span>ชาย</span></label>
+          <label><input type="radio" name="g" value="female" ${me.gender === 'female' ? 'checked' : ''}><span>หญิง</span></label>
+          <label><input type="radio" name="g" value="other" ${me.gender === 'other' ? 'checked' : ''}><span>ไม่ระบุ</span></label></div>
+        <label for="ph">เบอร์โทร (ไม่บังคับ)</label><input id="ph" type="tel" inputmode="tel" autocomplete="tel" value="${esc(me.phone || '')}">
+        <div class="disclaimer" style="margin-top:14px"><b>นโยบายความเป็นส่วนตัว (PDPA)</b><br>
+          โรงพยาบาลอ่างทองเก็บ ชื่อ-นามสกุล เลขบัตรประชาชน วันเกิด เพศ เบอร์โทร LINE User ID ข้อมูลการจองคิว ผลคัดกรองเพียง "ผ่าน/ไม่ผ่าน" และประวัติการบริจาค
+          เพื่อ ยืนยันตัวตน จองคิว แจ้งเตือน ออกใบเกียรติบัตร และบันทึกประวัติผู้บริจาคของธนาคารเลือดเท่านั้น
+          เลขบัตรประชาชนเข้าถึงได้เฉพาะผู้ดูแลระบบที่ได้รับมอบหมาย ระบบ<b>ไม่เก็บ</b>คำตอบด้านสุขภาพรายข้อ
+          คุณถอนความยินยอมและลบข้อมูลได้ทุกเมื่อที่เมนู "ข้อมูลส่วนตัว"</div>
         <div class="disclaimer">${NOT_CERT}<br>${DISCLAIMER}</div>
-        <label for="fn">ชื่อ-นามสกุล</label><input id="fn" type="text" autocomplete="name">
-        <label for="ph">เบอร์โทร (ไม่บังคับ)</label><input id="ph" type="tel" autocomplete="tel">
         <label style="display:flex;gap:8px;align-items:flex-start;font-weight:500"><input id="ok" type="checkbox" style="margin-top:5px">
           <span>ข้าพเจ้าได้อ่านและยินยอมให้เก็บ ใช้ ข้อมูลตามนโยบายนี้</span></label>
         <div id="err"></div>
-        <button id="go">ยินยอมและเริ่มใช้งาน</button>
+        <button id="go">${existing ? 'บันทึกข้อมูล' : 'ยินยอมและเริ่มใช้งาน'}</button>
+        ${existing ? '<button id="back" class="link">กลับ</button>' : ''}
       </div>`);
+    const $ = (id) => document.getElementById(id);
+    const dobISO = () => {
+      const y = $('by').value, m = $('bm').value, d = $('bd').value; if (!y || !m || !d) return null;
+      const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      return new Date(iso + 'T00:00:00Z').toISOString().slice(0, 10) === iso ? iso : '';      // '' = วันที่ไม่มีจริง เช่น 31 ก.พ.
+    };
+    const updAge = () => {
+      const iso = dobISO(), h = $('ageh');
+      if (iso === null) { h.textContent = ''; return; }
+      if (iso === '') { h.innerHTML = '<span style="color:#c62828">วันที่ไม่ถูกต้อง</span>'; return; }
+      const a = ageFrom(iso, todayBkk());
+      h.innerHTML = a >= 18 && a <= 60 ? `อายุ ${a} ปี ✓` : `<span style="color:#b26a00">อายุ ${a} ปี — ผู้บริจาคต้องอายุ 18-60 ปี (บันทึกข้อมูลได้ แต่จะจองคิวไม่ได้)</span>`;
+    };
+    ['bd', 'bm', 'by'].forEach((id) => $(id).addEventListener('change', updAge)); updAge();
+    $('cid').addEventListener('input', () => {
+      const d = $('cid').value.replace(/\D/g, '').slice(0, 13); $('cid').value = cidFormat(d);
+      $('cidh').innerHTML = d.length < 13 ? `พิมพ์แล้ว ${d.length}/13 หลัก` : cidValid(d) ? '✓ เลขบัตรถูกต้อง' : '<span style="color:#c62828">เลขบัตรไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง</span>';
+    });
+    on('back', home);
     on('go', async () => {
-      const full_name = document.getElementById('fn').value.trim();
-      if (!full_name) return showErr('กรุณากรอกชื่อ-นามสกุล');
-      if (!document.getElementById('ok').checked) return showErr('กรุณาติ๊กยินยอมก่อนใช้งาน');
+      const fn = $('fn').value.trim(), ln = $('ln').value.trim(), cid = $('cid').value.replace(/\D/g, '');
+      const iso = dobISO(), gender = document.querySelector('input[name=g]:checked')?.value;
+      if (!fn || !ln) return showErr('กรุณากรอกชื่อและนามสกุล');
+      if (!cidValid(cid)) return showErr('เลขบัตรประชาชนไม่ถูกต้อง กรุณาตรวจสอบเลข 13 หลักอีกครั้ง');
+      if (!iso) return showErr('กรุณาเลือกวันเกิดให้ครบและถูกต้อง');
+      if (!gender) return showErr('กรุณาเลือกเพศ');
+      if (!$('ok').checked) return showErr('กรุณาติ๊กยินยอมก่อนบันทึก');
       try {
-        await api('consent', { full_name, phone: document.getElementById('ph').value.trim() });
+        await api(existing ? 'profile' : 'consent', { full_name: `${fn} ${ln}`, phone: $('ph').value.trim(), cid, birth_date: iso, gender, accept: true });
         await refreshMe(); home();
       } catch (e) { showErr(e.message); }
     });
@@ -103,12 +160,14 @@
       </div>
       <div class="card">
         <button id="hist" class="secondary" style="margin-top:0">ประวัติการจอง/บริจาค</button>
+        <button id="editp" class="link">แก้ไขข้อมูลส่วนตัว</button>
         <button id="priv" class="link">ข้อมูลส่วนตัว / ลบข้อมูล</button>
       </div>
       <div class="disclaimer">${NOT_CERT}</div>`);
-    on('book', () => (state.me.screening_valid ? slots() : screening()));
+    on('book', () => (!state.me.profile_complete ? profileForm(true) : state.me.screening_valid ? slots() : screening()));
     on('hist', history);
     on('priv', privacy);
+    on('editp', () => profileForm(true));
     on('cancel', async () => {
       if (!confirm('ยืนยันยกเลิกคิวนี้?')) return;
       try { await api('cancel', { booking_id: b.id }); await refreshMe(); home(); } catch (e) { showErr(e.message); }
@@ -117,6 +176,9 @@
 
   // ---------- 2) คัดกรอง ----------
   function screening() {
+    // มีวันเกิด/เพศในระบบแล้ว: ไม่ถามอายุและเพศซ้ำ (เซิร์ฟเวอร์คำนวณเอง)
+    const knownGender = state.me.gender, knownAge = state.me.age != null;
+    const QS = QUESTIONS.filter((q) => !(knownAge && q.k === 'age_ok'));
     const yn = (k) => `<div class="opts">
         <label><input type="radio" name="${k}" value="yes"><span>ใช่</span></label>
         <label><input type="radio" name="${k}" value="no"><span>ไม่ใช่</span></label></div>`;
@@ -124,11 +186,11 @@
       <div class="card">
         <h2>แบบคัดกรองเบื้องต้น</h2>
         <div class="disclaimer">${DISCLAIMER}</div>
-        <div class="q"><b>เพศ</b><div class="opts">
+        ${knownGender ? '' : `<div class="q"><b>เพศ</b><div class="opts">
           <label><input type="radio" name="gender" value="female"><span>หญิง</span></label>
           <label><input type="radio" name="gender" value="male"><span>ชาย</span></label>
-          <label><input type="radio" name="gender" value="other"><span>ไม่ระบุ</span></label></div></div>
-        ${QUESTIONS.map((q, i) => `<div class="q"><b>${i + 1}. ${esc(q.t)}</b>${yn(q.k)}</div>`).join('')}
+          <label><input type="radio" name="gender" value="other"><span>ไม่ระบุ</span></label></div></div>`}
+        ${QS.map((q, i) => `<div class="q"><b>${i + 1}. ${esc(q.t)}</b>${yn(q.k)}</div>`).join('')}
         <div class="q" id="fq" style="display:none"><b>สำหรับผู้หญิง: ขณะนี้อยู่ในระยะมีประจำเดือน หรือคลอดบุตรภายใน 6 เดือน หรือไม่</b>${yn('female_condition')}</div>
         <div id="err"></div>
         <button id="submit">ส่งแบบคัดกรอง</button>
@@ -136,12 +198,13 @@
       </div>`);
     document.querySelectorAll('input[name=gender]').forEach((r) =>
       r.addEventListener('change', () => { document.getElementById('fq').style.display = r.value === 'female' ? 'block' : 'none'; }));
+    if (knownGender === 'female') document.getElementById('fq').style.display = 'block';
     on('back', home);
     on('submit', async () => {
       const val = (n) => document.querySelector(`input[name=${n}]:checked`)?.value;
-      const gender = val('gender');
+      const gender = knownGender || val('gender');
       const answers = { gender };
-      for (const q of QUESTIONS) {
+      for (const q of QS) {
         const v = val(q.k); if (!v) return showErr('กรุณาตอบให้ครบทุกข้อ');
         answers[q.k] = v === 'yes';
       }
@@ -367,7 +430,7 @@
     render(`
       <div class="card">
         <h2>ข้อมูลส่วนตัว</h2>
-        <p>คุณสามารถถอนความยินยอมและขอลบข้อมูลส่วนบุคคลได้ ระบบจะยกเลิกคิวที่รออยู่ ลบผลคัดกรอง และลบชื่อ-เบอร์โทรออกจากระบบ
+        <p>คุณสามารถถอนความยินยอมและขอลบข้อมูลส่วนบุคคลได้ ระบบจะยกเลิกคิวที่รออยู่ ลบผลคัดกรอง และลบชื่อ เลขบัตรประชาชน วันเกิด เบอร์โทรออกจากระบบ
         (ประวัติการบริจาคจะคงไว้โดยไม่ระบุตัวตนตามข้อกำหนดการเก็บเวชระเบียน)</p>
         <div id="err"></div>
         <button id="erase">ถอนความยินยอมและลบข้อมูลของฉัน</button>

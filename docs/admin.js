@@ -377,6 +377,11 @@
       <h3>3) ดูตัวอย่าง แล้วดาวน์โหลด</h3>
       <div class="row"><button class="btn sec" id="prev">ดูตัวอย่าง 20 แถวแรก</button><button class="btn" id="dl">⬇ ดาวน์โหลด CSV</button></div>
       <div id="prevbox" class="mute"></div></div>
+      ${isAdmin ? `<div class="card"><h2>ทะเบียนผู้บริจาค (เฉพาะผู้ดูแล)</h2>
+        <p class="mute">ไฟล์รูปแบบกลางสำหรับนำเข้าโปรแกรมบันทึกผู้บริจาค/ระบบอื่น — <b>มีเลขบัตรประชาชน</b> (หัวคอลัมน์เป็นภาษาอังกฤษ วันที่เป็น ค.ศ. ปปปป-ดด-วว) ·
+        ผู้ที่มีหลายบัญชี LINE แต่เลขบัตรเดียวกันรวมเป็นแถวเดียว · การเลือกช่วงวันที่ด้านบนใช้กับ "รายการบริจาค"</p>
+        <div class="row"><button class="btn sec" id="dldonors">⬇ ทะเบียนผู้บริจาคทั้งหมด (donors.csv)</button>
+        <button class="btn sec" id="dldonations">⬇ รายการบริจาครายครั้ง (donations.csv)</button></div></div>` : ''}
       ${isAdmin ? '<div class="card"><h2>ประวัติการดาวน์โหลด (เฉพาะผู้ดูแล)</h2><div id="hist" class="mute">กำลังโหลด...</div></div>' : ''}`;
     wireRange(() => { $('prevbox').innerHTML = ''; });
 
@@ -433,13 +438,50 @@
     };
 
     async function loadHist() {
-      const { data, error } = await sb.from('export_log').select('created_at, staff_name, date_from, date_to, status_filter, row_count').order('created_at', { ascending: false }).limit(20);
+      const { data, error } = await sb.from('export_log').select('created_at, staff_name, date_from, date_to, status_filter, row_count, kind').order('created_at', { ascending: false }).limit(20);
       const h = $('hist'); if (!h) return;
       if (error) { h.textContent = 'อ่านประวัติไม่ได้: ' + error.message; return; }
       h.className = '';
-      h.innerHTML = data.length ? `<table><tr><th>เมื่อ</th><th>ผู้ดาวน์โหลด</th><th>ช่วงวันที่</th><th>สถานะ</th><th>แถว</th></tr>
-        ${data.map((x) => `<tr><td>${esc(bkkTime(x.created_at))}</td><td>${esc(x.staff_name || '-')}</td><td>${esc(x.date_from)} ถึง ${esc(x.date_to)}</td><td>${esc(STATUS[x.status_filter]?.[0] || 'ทุกสถานะ')}</td><td>${x.row_count}</td></tr>`).join('')}</table>`
+      h.innerHTML = data.length ? `<table><tr><th>เมื่อ</th><th>ผู้ดาวน์โหลด</th><th>ชนิด</th><th>ช่วงวันที่</th><th>สถานะ</th><th>แถว</th></tr>
+        ${data.map((x) => `<tr><td>${esc(bkkTime(x.created_at))}</td><td>${esc(x.staff_name || '-')}</td><td>${esc({ donors: 'ทะเบียนผู้บริจาค', donations: 'รายการบริจาค' }[x.kind] || 'รายชื่อผู้จอง')}</td><td>${esc(x.date_from)} ถึง ${esc(x.date_to)}</td><td>${esc(STATUS[x.status_filter]?.[0] || 'ทุกสถานะ')}</td><td>${x.row_count}</td></tr>`).join('')}</table>`
         : 'ยังไม่มีการดาวน์โหลด';
+    }
+    if (isAdmin) {
+      const pageAll = async (fn, args) => {
+        const rows = [];
+        for (let off = 0; off < 100000; off += 1000) {
+          const { data, error } = await sb.rpc(fn, { ...args, p_limit: 1000, p_offset: off });
+          if (error) throw error;
+          rows.push(...data); if (data.length < 1000) break;
+        }
+        return rows;
+      };
+      const runAdminExport = async (btn, kind, fn, args, name, head, toRow, range) => {
+        btn.disabled = true; msg('กำลังดึงข้อมูล...');
+        try {
+          const rows = await pageAll(fn, args);
+          if (!rows.length) { msg('ไม่มีข้อมูลให้ดาวน์โหลด', true); return; }
+          const t = bkkToday();
+          const { error: le } = await sb.from('export_log').insert({ staff_name: S.me.display_name, date_from: range?.[0] ?? t, date_to: range?.[1] ?? t, row_count: rows.length, kind });
+          if (le) throw le;
+          const excel = $('exl').checked;
+          downloadCsv(name, head.map((h) => csvCell(h)), rows.map((x) => toRow(x, excel)));
+          msg(`ดาวน์โหลดแล้ว ${rows.length} แถว — ไฟล์มีเลขบัตรประชาชน กรุณาเก็บอย่างปลอดภัยและลบเมื่อใช้เสร็จ`);
+          loadHist();
+        } catch (e) { noFn(e); }
+        btn.disabled = false;
+      };
+      const c = (v, o) => csvCell(v, o);
+      $('dldonors').onclick = (ev) => runAdminExport(ev.currentTarget, 'donors', 'export_donors', {}, `donors_${bkkToday()}.csv`,
+        ['cid', 'first_name', 'last_name', 'gender', 'birth_date', 'age', 'phone', 'first_donation_date', 'last_donation_date', 'donation_count', 'donor_ref'],
+        (x, ex) => [c(x.cid, { phone: true, excel: ex }), c(x.first_name), c(x.last_name), c(x.gender), c(x.birth_date), c(x.age), c(x.phone, { phone: true, excel: ex }),
+          c(x.first_donation), c(x.last_donation), c(x.donation_count), c(x.donor_ref)]);
+      $('dldonations').onclick = (ev) => {
+        const r = readRange(); if (!r) return;
+        runAdminExport(ev.currentTarget, 'donations', 'export_donations', { p_from: r[0], p_to: r[1] }, `donations_${r[0]}_to_${r[1]}.csv`,
+          ['cid', 'donated_on', 'certificate_no', 'booking_id', 'donor_ref'],
+          (x, ex) => [c(x.cid, { phone: true, excel: ex }), c(x.donated_on), c(x.certificate_no), c(x.booking_id), c(x.donor_ref)], r);
+      };
     }
     if (isAdmin) loadHist();
   }
@@ -542,20 +584,50 @@
     ['notify_reminder',        false, 'เตือนล่วงหน้า 1 วันก่อนนัด', 'ช่วยลดคนไม่มาตามนัด แต่ใช้ 1 ข้อความต่อคิว'],
     ['notify_status_change',   false, 'แจ้งเมื่อเจ้าหน้าที่เปลี่ยนสถานะ (สำเร็จ / ยกเลิก / ไม่มา)', 'ผู้บริจาคดูสถานะได้เองในหน้า LIFF > ประวัติ'],
   ];
+  const CHANNELS = [
+    ['line', 'LINE OA (ใช้โควตาข้อความ push ของ LINE OA)'],
+    ['moph_alert', 'MOPH Alert (หมอพร้อม) อย่างเดียว — ไม่ใช้โควตา LINE OA'],
+    ['moph_alert_then_line', 'MOPH Alert ก่อน ถ้าส่งไม่สำเร็จค่อยส่งทาง LINE'],
+  ];
   async function settings() {
     const { data, error } = await sb.from('app_settings').select('key, value');
     if (error) return fail({ message: 'อ่านการตั้งค่าไม่ได้ — ยังไม่ได้รันไฟล์ settings.sql ใน Supabase หรือไม่? (' + error.message + ')' });
+    const raw = Object.fromEntries(data.map((r) => [r.key, r.value]));
     const cur = Object.fromEntries(data.map((r) => [r.key, r.value === 'true']));
-    $('view').innerHTML = `<div class="card"><h2>ตั้งค่าการแจ้งเตือนผู้บริจาคทาง LINE</h2>
-      <p class="mute">ทุกข้อความที่ระบบ "ส่ง" (push) หาผู้บริจาคจะหักโควตาข้อความของ LINE OA ตามแพ็กเกจของคุณ — เปิดเฉพาะที่จำเป็น
+    $('view').innerHTML = `<div class="card"><h2>ช่องทางแจ้งผู้บริจาค</h2>
+      <p class="mute">เลือกว่าข้อความถึงผู้บริจาคจะส่งทางใด · MOPH Alert ส่งโดยใช้เลขบัตรประชาชนที่ผู้บริจาคกรอก (ต้องตั้งค่า Secrets ของ MOPH Alert ในฟังก์ชันก่อน — ดูคู่มือ "อัปเดต v5")
+      ผู้ที่ไม่มีเลขบัตรในระบบจะส่งทาง LINE เมื่อเลือก "ก่อน ... แล้วค่อย LINE"</p>
+      <select id="donorch">${CHANNELS.map(([k, t]) => `<option value="${k}" ${(raw.donor_channel || 'line') === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      <div class="row" style="margin-top:10px"><label>ทดสอบ MOPH Alert: ส่งหาเลขบัตรของคุณเอง <input id="alertcid" type="text" inputmode="numeric" maxlength="17" placeholder="13 หลัก"></label>
+        <button class="btn sec sm" id="alerttest">ส่งทดสอบ</button></div></div>
+      <div class="card"><h2>ตั้งค่าการแจ้งเตือนผู้บริจาค</h2>
+      <p class="mute">ทุกข้อความที่ส่งหาผู้บริจาคทาง LINE จะหักโควตาข้อความของ LINE OA ตามแพ็กเกจของคุณ — เปิดเฉพาะที่จำเป็น
       (ตรวจโควตาที่เหลือได้ใน LINE OA Manager) · การแจ้งเจ้าหน้าที่ผ่านหมอพร้อมไม่ใช้โควตานี้และไม่ได้รับผลจากหน้านี้</p>
       ${DONOR_NOTIFY.map(([k, def, label, hint]) => `<label class="sw"><input type="checkbox" data-key="${k}" ${(k in cur ? cur[k] : def) ? 'checked' : ''}>
         <span><b>${esc(label)}</b><br><small class="mute">${esc(hint)}</small></span></label>`).join('')}
       <div class="row" style="margin-top:12px"><button class="btn" id="savesettings">บันทึกการตั้งค่า</button></div></div>`;
     $('savesettings').onclick = async () => {
       const rows = [...document.querySelectorAll('[data-key]')].map((c) => ({ key: c.dataset.key, value: c.checked ? 'true' : 'false' }));
+      rows.push({ key: 'donor_channel', value: $('donorch').value });
       const { error: e } = await sb.from('app_settings').upsert(rows, { onConflict: 'key' });
       e ? fail(e) : msg('บันทึกแล้ว (มีผลทันที)');
+    };
+    $('alerttest').onclick = async () => {
+      const cid = $('alertcid').value.replace(/\D/g, '');
+      if (cid.length !== 13) return msg('กรอกเลขบัตรประชาชน 13 หลักของคุณเอง', true);
+      msg('กำลังส่งข้อความทดสอบ...');
+      try {
+        const { data: ss } = await sb.auth.getSession();
+        const res = await fetch(`${C.FUNCTIONS_URL}/notify-test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ss.session.access_token}`, apikey: C.SUPABASE_ANON_KEY },
+          body: JSON.stringify({ alert_cid: cid }),
+        });
+        const r = await res.json();
+        $('alertcid').value = '';
+        r.ok ? msg('ส่งสำเร็จ — ตรวจดูข้อความในแอป/LINE หมอพร้อม')
+             : msg(r.response === 'NOT_CONFIGURED' ? 'ยังไม่ได้ตั้ง Secrets ของ MOPH Alert ในฟังก์ชัน' : `ส่งไม่สำเร็จ (HTTP ${r.status ?? res.status}) ${r.response ?? r.error ?? ''}`, true);
+      } catch (e) { fail(e); }
     };
   }
 
