@@ -8,7 +8,7 @@
 
   const S = { me: null, tab: 'bookings', view: 'week', date: bkkToday(), year: new Date().getFullYear() };
   const TABS = [['bookings', 'รายการจอง'], ['holidays', 'วันหยุด'], ['slots', 'ช่วงเวลา/ขีดจำกัดคิว'],
-                ['stats', 'สถิติ'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
+                ['stats', 'สถิติ'], ['export', 'ดาวน์โหลดข้อมูล'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
   const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['มาบริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const EVENTS = [['booking_created', 'จองใหม่'], ['booking_cancelled', 'ยกเลิกจอง'], ['daily_summary', 'สรุปนัดพรุ่งนี้']];
 
@@ -57,7 +57,7 @@
       <main><div id="msg"></div><div id="view"></div></main>`;
     $('logoutbtn').onclick = async () => { await sb.auth.signOut(); loginView(); };
     document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; shell(); }));
-    ({ bookings, holidays, slots, stats, search, channels, settings })[S.tab]();
+    ({ bookings, holidays, slots, stats, export: exportTab, search, channels, settings })[S.tab]();
   }
 
   // ---------- 1) รายการจอง: รายสัปดาห์ (ภาพรวม) / รายวัน (เปลี่ยนสถานะ) ----------
@@ -85,9 +85,12 @@
     (S.view === 'week' ? weekView : dayView)().catch(fail);
   }
 
+  const dowOf = (iso) => new Date(iso + 'T00:00:00Z').getUTCDay();            // 0=อาทิตย์ ... 6=เสาร์
+  // ขีดจำกัดของ "วันนั้น": จ-ศ = max_capacity, เสาร์ = sat_capacity, อาทิตย์ = sun_capacity (0 = ปิดรับ)
+  const capOf = (s, iso) => { const w = dowOf(iso); return Number(w === 6 ? s.sat_capacity : w === 0 ? s.sun_capacity : s.max_capacity) || 0; };
+
   async function weekView() {
-    const mon = mondayOf(S.date), fri = addDays(mon, 4);
-    const days = [0, 1, 2, 3, 4].map((n) => addDays(mon, n));
+    const mon = mondayOf(S.date), sun = addDays(mon, 6);
     $('bk').innerHTML = `<div class="row">
         <button class="btn sec sm" id="pw">◀ สัปดาห์ก่อน</button>
         <b id="wtitle" style="min-width:210px;text-align:center"></b>
@@ -99,18 +102,24 @@
     $('nw').onclick = () => { S.date = addDays(mon, 7); bookings(); };
     $('tw').onclick = () => { S.date = bkkToday(); bookings(); };
     $('jd').onchange = () => { if ($('jd').value) { S.date = $('jd').value; bookings(); } };
-    $('wtitle').textContent = `${fmt(mon, { day: 'numeric', month: 'short' })} - ${fmt(fri, { day: 'numeric', month: 'short', year: 'numeric' })}`;
 
     const [slotsR, bkR, holR] = await Promise.all([
-      sb.from('time_slots').select('id, label, max_capacity, is_active, start_time').order('start_time'),
-      sb.from('bookings').select('id, user_id, booking_date, time_slot_id, status').gte('booking_date', mon).lte('booking_date', fri),
-      sb.from('hospital_holidays').select('holiday_date, name').gte('holiday_date', mon).lte('holiday_date', fri),
+      sb.from('time_slots').select('*').order('start_time'),
+      sb.from('bookings').select('id, user_id, booking_date, time_slot_id, status').gte('booking_date', mon).lte('booking_date', sun),
+      sb.from('hospital_holidays').select('holiday_date, name').gte('holiday_date', mon).lte('holiday_date', sun),
     ]);
     for (const r of [slotsR, bkR, holR]) if (r.error) throw r.error;
+    // แสดงเสาร์-อาทิตย์เมื่อมีช่วงใดเปิดรับในวันนั้น หรือมีคิวจองค้างอยู่ (กันคิวหายจากหน้าจอ)
+    const weekendOn = slotsR.data.some((s) => s.sat_capacity > 0 || s.sun_capacity > 0) ||
+      bkR.data.some((b) => [0, 6].includes(dowOf(b.booking_date)));
+    const days = Array.from({ length: weekendOn ? 7 : 5 }, (_, n) => addDays(mon, n));
+    const last = days[days.length - 1];
+    $('wtitle').textContent = `${fmt(mon, { day: 'numeric', month: 'short' })} - ${fmt(last, { day: 'numeric', month: 'short', year: 'numeric' })}`;
     const users = await loadUsers(bkR.data);
     const hol = Object.fromEntries(holR.data.map((h) => [h.holiday_date, h.name]));
     const today = bkkToday();
     const nameOf = (b) => users.get(b.user_id)?.full_name || users.get(b.user_id)?.display_name || '(ไม่ระบุ)';
+    const nmList = (list) => list.map((b) => `<div class="nm ${b.status}" title="${esc(STATUS[b.status][0])}">${esc(nameOf(b))}${b.status === 'completed' ? ' ✓' : b.status === 'no_show' ? ' ✗' : ''}</div>`).join('');
 
     let html = '<div class="wkwrap"><table class="wk"><tr><th class="slt"></th>';
     for (const d of days) {
@@ -127,26 +136,33 @@
           // วันหยุดที่ยังมีคิวค้าง (จองไว้ก่อนเพิ่มวันหยุด) ต้องแสดงให้เจ้าหน้าที่เห็นและจัดการ
           dayTotals[d].used += used;
           html += list.length
-            ? `<td class="hol"><div class="cnt">⚠ ${used} คิวค้าง</div>${list.map((b) => `<div class="nm ${b.status}">${esc(nameOf(b))}</div>`).join('')}</td>`
+            ? `<td class="hol"><div class="cnt">⚠ ${used} คิวค้าง</div>${nmList(list)}</td>`
             : '<td class="hol">หยุด</td>';
           continue;
         }
-        if (!s.is_active) { html += '<td class="off">-</td>'; continue; }
-        dayTotals[d].used += used; dayTotals[d].cap += s.max_capacity;
-        const cls = used >= s.max_capacity ? 'full' : used > 0 ? 'some' : 'empty';
-        html += `<td class="${cls} ${d === today ? 'today' : ''}"><div class="cnt">${used}/${s.max_capacity}</div>` +
-          list.map((b) => `<div class="nm ${b.status}" title="${esc(STATUS[b.status][0])}">${esc(nameOf(b))}${b.status === 'completed' ? ' ✓' : b.status === 'no_show' ? ' ✗' : ''}</div>`).join('') + '</td>';
+        const cap = s.is_active ? capOf(s, d) : 0;
+        if (cap <= 0) {
+          // ปิดรับ (ตั้งเป็น 0 หรือปิดช่วงเวลา) แต่ถ้ายังมีคิวเดิมค้างอยู่ให้แสดงเตือน
+          dayTotals[d].used += used;
+          html += list.length
+            ? `<td class="hol"><div class="cnt">⚠ ${used} คิว (ปิดรับแล้ว)</div>${nmList(list)}</td>`
+            : '<td class="off">-</td>';
+          continue;
+        }
+        dayTotals[d].used += used; dayTotals[d].cap += cap;
+        const cls = used >= cap ? 'full' : used > 0 ? 'some' : 'empty';
+        html += `<td class="${cls} ${d === today ? 'today' : ''}"><div class="cnt">${used}/${cap}</div>${nmList(list)}</td>`;
       }
       html += '</tr>';
     }
     html += '<tr class="tot"><th class="slt">รวมต่อวัน</th>' +
-      days.map((d) => (hol[d] ? `<td class="hol">${dayTotals[d].used ? '⚠ ' + dayTotals[d].used + ' คิวค้าง' : '-'}</td>` : `<td><b>${dayTotals[d].used}</b> / ${dayTotals[d].cap}</td>`)).join('') + '</tr></table></div>';
+      days.map((d) => (hol[d] ? `<td class="hol">${dayTotals[d].used ? '⚠ ' + dayTotals[d].used + ' คิวค้าง' : '-'}</td>` : dayTotals[d].cap ? `<td><b>${dayTotals[d].used}</b> / ${dayTotals[d].cap}</td>` : `<td>${dayTotals[d].used ? '⚠ ' + dayTotals[d].used : '-'}</td>`)).join('') + '</tr></table></div>';
 
     const usedAll = Object.values(dayTotals).reduce((a, t) => a + t.used, 0), capAll = Object.values(dayTotals).reduce((a, t) => a + t.cap, 0);
     $('wk').className = '';
-    $('wk').innerHTML = `<p style="margin:4px 0 10px"><b>สัปดาห์นี้จอง ${usedAll} คิว</b> จากที่รับได้ ${capAll} คิว (ว่าง ${capAll - usedAll})</p>${html}
-      <p class="mute" style="margin-top:8px"><span class="lg full"></span>เต็ม <span class="lg some"></span>มีผู้จอง <span class="lg empty"></span>ว่าง <span class="lg hol"></span>วันหยุด
-      · ✓ = บริจาคสำเร็จ · ✗ = ไม่มา · คิวที่ยกเลิกไม่แสดง · กดที่หัววันเพื่อเปลี่ยนสถานะรายวัน</p>`;
+    $('wk').innerHTML = `<p style="margin:4px 0 10px"><b>สัปดาห์นี้จอง ${usedAll} คิว</b> จากที่รับได้ ${capAll} คิว (ว่าง ${Math.max(capAll - usedAll, 0)})</p>${html}
+      <p class="mute" style="margin-top:8px"><span class="lg full"></span>เต็ม <span class="lg some"></span>มีผู้จอง <span class="lg empty"></span>ว่าง <span class="lg hol"></span>วันหยุด/ปิดรับ
+      · ✓ = บริจาคสำเร็จ · ✗ = ไม่มา · คิวที่ยกเลิกไม่แสดง · กดที่หัววันเพื่อเปลี่ยนสถานะรายวัน${weekendOn ? '' : ' · เสาร์-อาทิตย์ปิดรับ (เปิดได้ที่แท็บ "ช่วงเวลา/ขีดจำกัดคิว")'}</p>`;
     document.querySelectorAll('[data-day]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); S.date = a.dataset.day; S.view = 'day'; bookings(); }));
   }
 
@@ -197,7 +213,7 @@
   // ---------- 2) วันหยุด ----------
   async function holidays() {
     $('view').innerHTML = `<div class="card"><h2>วันหยุดราชการ/วันหยุดโรงพยาบาล</h2>
-      <p class="mute">เสาร์-อาทิตย์ปิดอัตโนมัติ ไม่ต้องเพิ่มที่นี่ · วันที่เพิ่มจะปิดรับจองทันที (ไม่ยกเลิกคิวที่จองไว้แล้ว)</p>
+      <p class="mute">วันที่เพิ่มที่นี่จะปิดรับจองทันที แม้เป็นเสาร์-อาทิตย์ที่เปิดรับตามปกติ (ไม่ยกเลิกคิวที่จองไว้แล้ว) · เสาร์-อาทิตย์เปิด/ปิดที่แท็บ "ช่วงเวลา/ขีดจำกัดคิว"</p>
       <div class="row"><input type="date" id="hd"><input id="hn" placeholder="ชื่อวันหยุด" style="min-width:220px"><button class="btn" id="add">เพิ่ม</button></div>
       <div id="list" class="mute">กำลังโหลด...</div></div>`;
     $('add').onclick = async () => {
@@ -223,42 +239,209 @@
   async function slots() {
     const { data, error } = await sb.from('time_slots').select('*').order('start_time');
     if (error) return fail(error);
+    if (data.length && !('sat_capacity' in data[0])) {
+      return fail({ message: 'ฐานข้อมูลยังไม่รองรับเสาร์-อาทิตย์ — รันไฟล์ weekend.sql ใน Supabase SQL Editor ก่อน (ดูคู่มือ "อัปเดต v4")' });
+    }
+    const num = (id, v) => `<input type="number" min="0" max="50" id="${id}" value="${v}">`;
     $('view').innerHTML = `<div class="card"><h2>ขีดจำกัดคิวต่อช่วงเวลา</h2>
-      <p class="mute">ตั้งเป็น 0 หรือปิดใช้งานเพื่อหยุดรับจองช่วงนั้น · มีผลกับการจองใหม่ (คิวเดิมไม่ถูกยกเลิก)</p>
-      <table><tr><th>ช่วงเวลา</th><th>รับได้ (คน)</th><th>เปิดใช้งาน</th><th></th></tr>
-      ${data.map((s) => `<tr><td>${esc(s.label)} น.</td><td><input type="number" min="0" max="50" id="c${s.id}" value="${s.max_capacity}"></td>
+      <p class="mute">กำหนดจำนวนที่รับได้ <b>แยกตามประเภทวัน</b> · ใส่ <b>0 = ปิดรับ</b>วันประเภทนั้น (เช่น เสาร์เปิดเฉพาะช่วงเช้า ก็ใส่ 0 ที่ช่วงบ่าย) ·
+      วันหยุดที่เพิ่มในแท็บ "วันหยุด" ปิดรับเสมอ · มีผลกับการจองใหม่ (คิวเดิมไม่ถูกยกเลิก)</p>
+      <table><tr><th>ช่วงเวลา</th><th>จันทร์-ศุกร์</th><th>เสาร์</th><th>อาทิตย์</th><th>เปิดใช้งาน</th><th></th></tr>
+      ${data.map((s) => `<tr><td>${esc(s.label)} น.</td><td>${num('c' + s.id, s.max_capacity)}</td><td>${num('sa' + s.id, s.sat_capacity)}</td><td>${num('su' + s.id, s.sun_capacity)}</td>
         <td><input type="checkbox" id="a${s.id}" ${s.is_active ? 'checked' : ''}></td>
         <td><button class="btn sm" data-id="${s.id}">บันทึก</button></td></tr>`).join('')}</table></div>`;
     document.querySelectorAll('#view button[data-id]').forEach((b) => (b.onclick = async () => {
-      const id = b.dataset.id; const cap = Number($('c' + id).value);
-      if (!Number.isInteger(cap) || cap < 0 || cap > 50) return msg('จำนวนต้องเป็นเลข 0-50', true);
-      const { error } = await sb.from('time_slots').update({ max_capacity: cap, is_active: $('a' + id).checked }).eq('id', id);
+      const id = b.dataset.id;
+      const v = { max_capacity: Number($('c' + id).value), sat_capacity: Number($('sa' + id).value), sun_capacity: Number($('su' + id).value) };
+      if (!Object.values(v).every((n) => Number.isInteger(n) && n >= 0 && n <= 50)) return msg('จำนวนต้องเป็นเลข 0-50', true);
+      const { error } = await sb.from('time_slots').update({ ...v, is_active: $('a' + id).checked }).eq('id', id);
       error ? fail(error) : msg('บันทึกแล้ว');
     }));
   }
 
-  // ---------- 4) สถิติ ----------
+  // ---------- ตัวช่วยเลือกช่วงวันที่ (ใช้ร่วมกันระหว่างแท็บสถิติและดาวน์โหลด) ----------
+  const monthStart = (iso, add = 0) => { const [y, m] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1 + add, 1)).toISOString().slice(0, 10); };
+  const PRESETS = [
+    ['thismonth', 'เดือนนี้'], ['lastmonth', 'เดือนที่แล้ว'], ['last30', '30 วันล่าสุด'],
+    ['fy', 'ปีงบประมาณนี้'], ['thisyear', 'ปีนี้ (ม.ค.-ธ.ค.)'], ['all', 'ทั้งหมด'],
+  ];
+  function presetRange(k) {
+    const t = bkkToday(), y = Number(t.slice(0, 4)), m = Number(t.slice(5, 7));
+    if (k === 'thismonth') return [monthStart(t), addDays(monthStart(t, 1), -1)];
+    if (k === 'lastmonth') return [monthStart(t, -1), addDays(monthStart(t), -1)];
+    if (k === 'last30') return [addDays(t, -29), t];
+    if (k === 'fy') { const fy = m >= 10 ? y : y - 1; return [`${fy}-10-01`, `${fy + 1}-09-30`]; }   // ปีงบประมาณไทย 1 ต.ค. - 30 ก.ย.
+    if (k === 'thisyear') return [`${y}-01-01`, `${y}-12-31`];
+    return ['2020-01-01', addDays(t, 90)];
+  }
+  const rangeBar = (from, to) => `<div class="row"><label>ตั้งแต่ <input type="date" id="rf" value="${from}"></label>
+      <label>ถึง <input type="date" id="rt" value="${to}"></label></div>
+    <div class="row">${PRESETS.map(([k, t]) => `<button class="btn sec sm" data-preset="${k}">${t}</button>`).join('')}</div>`;
+  function wireRange(onPreset) {
+    document.querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => {
+      const [f, t] = presetRange(b.dataset.preset); $('rf').value = f; $('rt').value = t; onPreset();
+    }));
+  }
+  function readRange() {
+    const f = $('rf').value, t = $('rt').value;
+    if (!f || !t) { msg('เลือกวันที่เริ่มและวันที่สิ้นสุดให้ครบ', true); return null; }
+    if (f > t) { msg('วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด', true); return null; }
+    if (new Date(t) - new Date(f) > 20 * 366 * 864e5) { msg('เลือกช่วงได้ไม่เกิน 20 ปี', true); return null; }
+    msg(''); return [f, t];
+  }
+
+  // ---------- CSV ----------
+  // - ใส่ BOM เพื่อให้ Excel อ่านภาษาไทยถูก · ขึ้นบรรทัดใหม่แบบ CRLF
+  // - กันสูตรแฝง (CSV injection): ข้อความที่ขึ้นต้นด้วย = + - @ จะถูกนำหน้าด้วย '
+  // - excelPhone: เบอร์โทรเป็น ="0812345678" เพื่อไม่ให้ Excel ตัดเลข 0 หน้า (ปิดตัวเลือกนี้ถ้าจะนำเข้าโปรแกรมอื่น)
+  function csvCell(v, { phone = false, excel = false } = {}) {
+    if (v === null || v === undefined) return '';
+    let t = String(v);
+    if (phone && excel && /^[0-9+\- ]+$/.test(t)) return `"=""${t}"""`;
+    if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+    return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  }
+  function downloadCsv(name, header, rows) {
+    const text = '﻿' + [header, ...rows].map((r) => r.join(',')).join('\r\n') + '\r\n';
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // ---------- 4) สถิติ (เลือกช่วงวันที่) ----------
+  const GROUPS = [['auto', 'อัตโนมัติ'], ['day', 'รายวัน'], ['week', 'รายสัปดาห์'], ['month', 'รายเดือน'], ['year', 'รายปี']];
+  const pct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '-');
+  function periodLabel(p, g) {
+    if (g === 'day') return fmt(p, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    if (g === 'week') return `${fmt(p, { day: 'numeric', month: 'short' })} - ${fmt(addDays(p, 6), { day: 'numeric', month: 'short', year: '2-digit' })}`;
+    if (g === 'year') return fmt(p, { year: 'numeric' });
+    return fmt(p, { month: 'long', year: 'numeric' });
+  }
+
   async function stats() {
+    if (!S.sFrom) [S.sFrom, S.sTo] = presetRange('fy');
+    S.sGroup = S.sGroup || 'auto';
     $('view').innerHTML = `<div class="card"><h2>สถิติการจองและการบริจาค</h2>
-      <div class="row"><label>ปี (ค.ศ.) <input type="number" id="y" value="${S.year ?? ''}" min="2020" max="2100" placeholder="ทุกปี"></label>
-        <button class="btn sec sm" id="allyears">ทุกปี</button><button class="btn sm" id="showstats">ดู</button></div>
+      ${rangeBar(S.sFrom, S.sTo)}
+      <div class="row"><label>แสดงแบบ <select id="grp">${GROUPS.map(([k, t]) => `<option value="${k}" ${S.sGroup === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <button class="btn sm" id="showstats">ดูสถิติ</button></div>
       <div id="statsbox" class="mute">กำลังโหลด...</div></div>`;
-    $('showstats').onclick = () => { S.year = Number($('y').value) || null; stats(); };
-    $('allyears').onclick = () => { S.year = null; stats(); };
-    const { data, error } = await sb.rpc('stats_monthly', { p_year: S.year });
-    if (error) return fail(error);
+    const run = () => { const r = readRange(); if (!r) return; [S.sFrom, S.sTo] = r; S.sGroup = $('grp').value; stats(); };
+    $('showstats').onclick = run; wireRange(run);
+
+    const days = Math.round((new Date(S.sTo) - new Date(S.sFrom)) / 864e5) + 1;
+    let g = S.sGroup;
+    if (g === 'auto') g = days <= 31 ? 'day' : days <= 120 ? 'week' : days <= 1100 ? 'month' : 'year';
+    let note = '';
+    if (g === 'day' && days > 366) { g = 'week'; note = 'ช่วงยาวเกิน 1 ปี จึงแสดงเป็นรายสัปดาห์แทน'; }
+    const { data, error } = await sb.rpc('stats_range', { p_from: S.sFrom, p_to: S.sTo, p_group: g });
+    if (error) return fail(error.code === 'PGRST202' || /stats_range/.test(error.message || '') ? { message: 'ยังไม่ได้รันไฟล์ reports.sql ใน Supabase (ดูคู่มือ "อัปเดต v4") — ' + error.message } : error);
     const box = $('statsbox'); box.className = '';
     if (!data.length) { box.innerHTML = '<p class="mute">ไม่มีข้อมูลในช่วงที่เลือก</p>'; return; }
     const max = Math.max(...data.map((r) => r.booked), 1);
-    const tot = data.reduce((a, r) => ({ b: a.b + r.booked, c: a.c + r.completed, x: a.x + r.cancelled, n: a.n + r.no_show }), { b: 0, c: 0, x: 0, n: 0 });
+    const t = data.reduce((a, r) => ({ b: a.b + r.booked, p: a.p + r.pending, c: a.c + r.completed, x: a.x + r.cancelled, n: a.n + r.no_show, nd: a.nd + r.new_donors }),
+      { b: 0, p: 0, c: 0, x: 0, n: 0, nd: 0 });
     const tile = (label, v, cls) => `<div class="kpi ${cls}"><div class="kv">${v}</div><div class="kl">${label}</div></div>`;
+    const rangeTxt = `${fmt(S.sFrom, { day: 'numeric', month: 'short', year: 'numeric' })} - ${fmt(S.sTo, { day: 'numeric', month: 'short', year: 'numeric' })}`;
     box.innerHTML = `
-      <div class="kpis">${tile('จองทั้งหมด', tot.b, '')}${tile('บริจาคสำเร็จ', tot.c, 'ok')}${tile('ยกเลิก', tot.x, 'bad')}${tile('ไม่มา', tot.n, 'warn')}</div>
-      <h3>แยกรายเดือน</h3>
-      <div class="tblwrap"><table><tr><th>เดือน</th><th>จอง</th><th>บริจาคสำเร็จ</th><th>ยกเลิก</th><th>ไม่มา</th><th style="min-width:140px">กราฟ</th></tr>
-      ${data.map((r) => `<tr><td>${esc(fmt(r.month, { month: 'long', year: 'numeric' }))}</td><td>${r.booked}</td><td>${r.completed}</td><td>${r.cancelled}</td><td>${r.no_show}</td>
+      <p class="mute" style="margin:0 0 6px">ช่วง ${esc(rangeTxt)} (นับตามวันที่นัด) ${note ? '· ' + esc(note) : ''}</p>
+      <div class="kpis">${tile('จองทั้งหมด', t.b, '')}${tile('รอยืนยัน (ยังไม่บันทึกผล)', t.p, 'warn')}${tile('บริจาคสำเร็จ', t.c, 'ok')}${tile('ผู้บริจาคครั้งแรก', t.nd, 'ok')}
+        ${tile('ยกเลิก', t.x, 'bad')}${tile('ไม่มา', t.n, 'bad')}${tile('อัตราสำเร็จ (สำเร็จ ÷ มา+ไม่มา)', pct(t.c, t.c + t.n), 'ok')}${tile('อัตราไม่มาตามนัด', pct(t.n, t.c + t.n), 'warn')}</div>
+      <h3>${esc(GROUPS.find(([k]) => k === g)[1])}</h3>
+      <div class="tblwrap"><table><tr><th>ช่วง</th><th>จอง</th><th>รอ</th><th>สำเร็จ</th><th>ครั้งแรก</th><th>ยกเลิก</th><th>ไม่มา</th><th style="min-width:140px">กราฟ</th></tr>
+      ${data.map((r) => `<tr><td>${esc(periodLabel(r.period, g))}</td><td>${r.booked}</td><td>${r.pending}</td><td>${r.completed}</td><td>${r.new_donors}</td><td>${r.cancelled}</td><td>${r.no_show}</td>
         <td><div class="bar" style="width:${(r.booked / max) * 100}%"></div><div class="bar g" style="width:${(r.completed / max) * 100}%;margin-top:2px"></div></td></tr>`).join('')}</table></div>
-      <p class="mute" style="margin-top:8px">แถบแดง = จอง · แถบเขียว = บริจาคสำเร็จ</p>`;
+      <p class="mute" style="margin-top:8px">แถบแดง = จอง · แถบเขียว = บริจาคสำเร็จ</p>
+      <div class="row" style="margin-top:10px"><button class="btn sec sm" id="dlstats">⬇ ดาวน์โหลดตารางสถิตินี้ (CSV · ไม่มีข้อมูลส่วนบุคคล)</button>
+        <button class="btn sec sm" id="togo">⬇ ไปดาวน์โหลดรายชื่อผู้จองช่วงนี้</button></div>`;
+    $('dlstats').onclick = () => downloadCsv(`stats_${S.sFrom}_to_${S.sTo}.csv`,
+      ['ช่วง(วันแรก)', 'จอง', 'รอยืนยัน', 'บริจาคสำเร็จ', 'ผู้บริจาคครั้งแรก', 'ยกเลิก', 'ไม่มา'],
+      data.map((r) => [r.period, r.booked, r.pending, r.completed, r.new_donors, r.cancelled, r.no_show]));
+    $('togo').onclick = () => { S.eFrom = S.sFrom; S.eTo = S.sTo; S.tab = 'export'; shell(); };
+  }
+
+  // ---------- 4.5) ดาวน์โหลดข้อมูล (รายชื่อผู้จอง) ----------
+  const EXP_STATUS = [['', 'ทุกสถานะ'], ['completed', 'เฉพาะ: มาบริจาคสำเร็จ'], ['pending', 'เฉพาะ: รอยืนยัน'], ['cancelled', 'เฉพาะ: ยกเลิก'], ['no_show', 'เฉพาะ: ไม่มา']];
+  const bkkTime = (iso) => (iso ? new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') : '');
+
+  async function exportTab() {
+    if (!S.eFrom) [S.eFrom, S.eTo] = presetRange('thismonth');
+    const isAdmin = S.me.role === 'admin';
+    $('view').innerHTML = `<div class="card"><h2>ดาวน์โหลดรายชื่อผู้จอง</h2>
+      <div class="disclaimer">⚠ ไฟล์นี้มี <b>ข้อมูลส่วนบุคคล</b> (ชื่อ เบอร์โทร) — ใช้เฉพาะงานของธนาคารเลือด เก็บในที่ปลอดภัย และลบเมื่อใช้เสร็จ · ระบบบันทึกชื่อผู้ดาวน์โหลดทุกครั้ง</div>
+      <h3>1) เลือกช่วงวันที่นัด</h3>${rangeBar(S.eFrom, S.eTo)}
+      <h3>2) ตัวเลือก</h3>
+      <div class="row"><label>สถานะ <select id="est">${EXP_STATUS.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></label></div>
+      <label class="ck"><input type="checkbox" id="eanon"> ไม่รวมชื่อ-นามสกุล/เบอร์โทร/ชื่อ LINE (สำหรับวิเคราะห์สถิติอย่างเดียว)</label><br>
+      <label class="ck"><input type="checkbox" id="exl" checked> จัดรูปแบบสำหรับเปิดด้วย Excel (เบอร์โทรไม่ถูกตัดเลข 0 หน้า) — ปิดข้อนี้ถ้าจะนำเข้าโปรแกรมอื่น</label>
+      <h3>3) ดูตัวอย่าง แล้วดาวน์โหลด</h3>
+      <div class="row"><button class="btn sec" id="prev">ดูตัวอย่าง 20 แถวแรก</button><button class="btn" id="dl">⬇ ดาวน์โหลด CSV</button></div>
+      <div id="prevbox" class="mute"></div></div>
+      ${isAdmin ? '<div class="card"><h2>ประวัติการดาวน์โหลด (เฉพาะผู้ดูแล)</h2><div id="hist" class="mute">กำลังโหลด...</div></div>' : ''}`;
+    wireRange(() => { $('prevbox').innerHTML = ''; });
+
+    const HEAD = ['วันที่นัด', 'ช่วงเวลา', 'สถานะ', 'รหัสสถานะ', 'ชื่อ-นามสกุล', 'เบอร์โทร', 'ชื่อใน LINE', 'เวลาที่จอง', 'เวลายกเลิก',
+      'เลขใบเกียรติบัตร', 'วันที่บริจาค', 'จำนวนครั้งที่บริจาคสะสม', 'บริจาคครั้งแรก', 'รหัสการจอง'];
+    const PERSONAL = [4, 5, 6];                                       // คอลัมน์ข้อมูลส่วนบุคคล
+    const fetchPage = (r, st, off, lim) => sb.rpc('export_bookings', { p_from: r[0], p_to: r[1], p_status: st || null, p_limit: lim, p_offset: off });
+    const toRow = (x, anon, excel) => {
+      const c = (v, o) => csvCell(v, o);
+      const all = [c(x.booking_date), c(x.slot_label), c(STATUS[x.status]?.[0] ?? x.status), c(x.status),
+        c(x.full_name ?? ''), c(x.phone ?? '', { phone: true, excel }), c(x.line_display_name ?? ''),
+        c(bkkTime(x.booked_at)), c(bkkTime(x.cancelled_at)), c(x.certificate_no ?? ''), c(x.donated_on ?? ''),
+        c(x.donation_count), c(x.status === 'completed' ? (x.is_first_time ? 'ใช่' : 'ไม่ใช่') : ''), c(x.booking_id)];
+      return anon ? all.filter((_, i) => !PERSONAL.includes(i)) : all;
+    };
+    const head = (anon) => (anon ? HEAD.filter((_, i) => !PERSONAL.includes(i)) : HEAD).map((h) => csvCell(h));
+    const noFn = (e) => fail(/export_bookings|export_log/.test(e.message || '') && /not find|does not exist|schema cache/.test(e.message || '')
+      ? { message: 'ยังไม่ได้รันไฟล์ reports.sql ใน Supabase (ดูคู่มือ "อัปเดต v4") — ' + e.message } : e);
+
+    $('prev').onclick = async () => {
+      const r = readRange(); if (!r) return;
+      $('prevbox').textContent = 'กำลังโหลด...';
+      const { data, error } = await fetchPage(r, $('est').value, 0, 20);
+      if (error) { $('prevbox').textContent = ''; return noFn(error); }
+      if (!data.length) { $('prevbox').textContent = 'ไม่มีข้อมูลในช่วง/สถานะที่เลือก'; return; }
+      const anon = $('eanon').checked;
+      $('prevbox').className = 'tblwrap';
+      $('prevbox').innerHTML = `<table><tr><th>วันที่นัด</th><th>ช่วงเวลา</th><th>สถานะ</th>${anon ? '' : '<th>ชื่อ-นามสกุล</th><th>เบอร์โทร</th>'}<th>ครั้งที่</th></tr>
+        ${data.map((x) => `<tr><td>${esc(x.booking_date)}</td><td>${esc(x.slot_label)}</td><td>${esc(STATUS[x.status]?.[0] ?? x.status)}</td>${anon ? '' : `<td>${esc(x.full_name || '(ลบข้อมูลแล้ว)')}</td><td>${esc(x.phone || '-')}</td>`}<td>${x.donation_count}</td></tr>`).join('')}</table>
+        <p class="mute">ตัวอย่างเท่านั้น — ไฟล์จริงมีครบทุกแถวและทุกคอลัมน์</p>`;
+    };
+
+    $('dl').onclick = async () => {
+      const r = readRange(); if (!r) return;
+      const st = $('est').value, anon = $('eanon').checked, excel = $('exl').checked;
+      const btn = $('dl'); btn.disabled = true; msg('กำลังดึงข้อมูล...');
+      try {
+        const rows = [];
+        for (let off = 0; off < 50000; off += 1000) {                 // ดึงทีละ 1,000 แถว สูงสุด 50,000
+          const { data, error } = await fetchPage(r, st, off, 1000);
+          if (error) throw error;
+          rows.push(...data);
+          if (data.length < 1000) break;
+        }
+        if (!rows.length) { msg('ไม่มีข้อมูลในช่วง/สถานะที่เลือก — ไม่มีไฟล์ให้ดาวน์โหลด', true); return; }
+        // บันทึกประวัติก่อนส่งไฟล์ — ถ้าบันทึกไม่ได้ จะไม่ให้ดาวน์โหลด (ตรวจสอบย้อนหลังได้เสมอ)
+        const { error: le } = await sb.from('export_log').insert({ staff_name: S.me.display_name, date_from: r[0], date_to: r[1], status_filter: st || null, row_count: rows.length });
+        if (le) throw le;
+        downloadCsv(`bookings_${r[0]}_to_${r[1]}${st ? '_' + st : ''}${anon ? '_anon' : ''}.csv`, head(anon), rows.map((x) => toRow(x, anon, excel)));
+        msg(`ดาวน์โหลดแล้ว ${rows.length} แถว — กรุณาเก็บไฟล์อย่างปลอดภัยและลบเมื่อใช้เสร็จ`);
+        if (isAdmin) loadHist();
+      } catch (e) { noFn(e); }
+      btn.disabled = false;
+    };
+
+    async function loadHist() {
+      const { data, error } = await sb.from('export_log').select('created_at, staff_name, date_from, date_to, status_filter, row_count').order('created_at', { ascending: false }).limit(20);
+      const h = $('hist'); if (!h) return;
+      if (error) { h.textContent = 'อ่านประวัติไม่ได้: ' + error.message; return; }
+      h.className = '';
+      h.innerHTML = data.length ? `<table><tr><th>เมื่อ</th><th>ผู้ดาวน์โหลด</th><th>ช่วงวันที่</th><th>สถานะ</th><th>แถว</th></tr>
+        ${data.map((x) => `<tr><td>${esc(bkkTime(x.created_at))}</td><td>${esc(x.staff_name || '-')}</td><td>${esc(x.date_from)} ถึง ${esc(x.date_to)}</td><td>${esc(STATUS[x.status_filter]?.[0] || 'ทุกสถานะ')}</td><td>${x.row_count}</td></tr>`).join('')}</table>`
+        : 'ยังไม่มีการดาวน์โหลด';
+    }
+    if (isAdmin) loadHist();
   }
 
   // ---------- 5) ค้นหาผู้บริจาค ----------

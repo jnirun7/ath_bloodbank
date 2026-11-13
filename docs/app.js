@@ -169,7 +169,7 @@
   }
 
   // ---------- 3) เลือกคิว: ปฏิทินรายเดือน ----------
-  // จุดเขียว = ว่างให้จอง · จุดแดง = เต็ม · จุดส้ม/พื้นส้ม = วันหยุด · เทา = เสาร์-อาทิตย์/ปิดรับ
+  // จุดเขียว = ว่างให้จอง · จุดแดง = เต็ม · จุดส้ม/พื้นส้ม = วันหยุด · เทา = ปิดรับ (รวมเสาร์-อาทิตย์ที่ไม่เปิด)
   const DOW = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
   const monthLabel = (ym) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'UTC', month: 'long', year: 'numeric' });
   const shiftMonth = (ym, n) => { const d = new Date(`${ym}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7); };
@@ -190,10 +190,9 @@
   function dayInfo(d) {
     if (d < state.today || d > state.maxDate) return { s: 'out' };
     if (state.holidays[d]) return { s: 'holiday', name: state.holidays[d] };
-    const dow = new Date(d + 'T00:00:00Z').getUTCDay();
-    if (dow === 0 || dow === 6) return { s: 'weekend' };
+    // เสาร์-อาทิตย์เปิดรับได้ถ้าเจ้าหน้าที่ตั้งจำนวนไว้ (เซิร์ฟเวอร์ส่งมาเฉพาะวัน/ช่วงที่เปิด) จึงดูจากรายการช่วงเวลาอย่างเดียว
     const list = state.slots.filter((x) => x.slot_date === d);
-    if (!list.length) return { s: 'none' };                      // ช่วงเวลาของวันนี้ผ่านไปหมดแล้ว/ไม่เปิดรับ
+    if (!list.length) return { s: 'none' };                      // ไม่เปิดรับ (เช่น เสาร์-อาทิตย์ที่ปิด) หรือช่วงเวลาผ่านไปหมดแล้ว
     return list.some((x) => x.available > 0) ? { s: 'open' } : { s: 'full' };
   }
 
@@ -240,7 +239,7 @@
           <button class="cal-nav" id="nm" ${ym >= maxM ? 'disabled' : ''} aria-label="เดือนถัดไป">›</button>
         </div>
         <div class="cal-grid">${cells}</div>
-        <div class="legend"><span><i class="dot g"></i>ว่างให้จอง</span><span><i class="dot r"></i>เต็ม</span><span><i class="dot o"></i>วันหยุด</span><span><i class="dot x"></i>ปิดรับ (เสาร์-อาทิตย์/ผ่านแล้ว)</span></div>
+        <div class="legend"><span><i class="dot g"></i>ว่างให้จอง</span><span><i class="dot r"></i>เต็ม</span><span><i class="dot o"></i>วันหยุด</span><span><i class="dot x"></i>ปิดรับ/ผ่านแล้ว</span></div>
         ${monthHolidays.length ? `<div class="holnote">วันหยุดเดือนนี้: ${monthHolidays.map(([d, n]) => `${esc(fmtDate(d, { day: 'numeric' }))} ${esc(n)}`).join(' · ')}</div>` : ''}
         <div class="slotpanel">${panel}</div>
         <div id="err"></div>
