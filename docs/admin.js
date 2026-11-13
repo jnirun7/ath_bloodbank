@@ -595,8 +595,8 @@
     const raw = Object.fromEntries(data.map((r) => [r.key, r.value]));
     const cur = Object.fromEntries(data.map((r) => [r.key, r.value === 'true']));
     $('view').innerHTML = `<div class="card"><h2>ช่องทางแจ้งผู้บริจาค</h2>
-      <p class="mute">เลือกว่าข้อความถึงผู้บริจาคจะส่งทางใด · MOPH Alert ส่งโดยใช้เลขบัตรประชาชนที่ผู้บริจาคกรอก (ต้องตั้งค่า Secrets ของ MOPH Alert ในฟังก์ชันก่อน — ดูคู่มือ "อัปเดต v5")
-      ผู้ที่ไม่มีเลขบัตรในระบบจะส่งทาง LINE เมื่อเลือก "ก่อน ... แล้วค่อย LINE"</p>
+      <p class="mute">เลือกว่าข้อความถึงผู้บริจาคจะส่งทางใด · MOPH Alert ส่งโดยใช้เลขบัตรประชาชนที่ผู้บริจาคกรอก (ต้องตั้ง Secrets client-key/secret-key ของ MOPH Alert ในฟังก์ชันก่อน — ดูคู่มือ "อัปเดต v5")
+      ผู้ที่ไม่ได้ลงทะเบียนไลน์หมอพร้อมด้วยเลขบัตรนี้จะส่งไม่ถึง (404) — แนะนำโหมด "ก่อน ... แล้วค่อย LINE"</p>
       <select id="donorch">${CHANNELS.map(([k, t]) => `<option value="${k}" ${(raw.donor_channel || 'line') === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
       <div class="row" style="margin-top:10px"><label>ทดสอบ MOPH Alert: ส่งหาเลขบัตรของคุณเอง <input id="alertcid" type="text" inputmode="numeric" maxlength="17" placeholder="13 หลัก"></label>
         <button class="btn sec sm" id="alerttest">ส่งทดสอบ</button></div></div>
