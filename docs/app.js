@@ -161,7 +161,7 @@
       <div class="card">
         <button id="hist" class="secondary" style="margin-top:0">ประวัติการจอง/บริจาค</button>
         <button id="editp" class="link">แก้ไขข้อมูลส่วนตัว</button>
-        <button id="priv" class="link">ข้อมูลส่วนตัว / ลบข้อมูล</button>
+        <button id="priv" class="link">ข้อมูลของฉัน</button>
       </div>
       <div class="disclaimer">${NOT_CERT}</div>`);
     on('book', () => (!state.me.profile_complete ? profileForm(true) : state.me.screening_valid ? slots() : screening()));
@@ -425,25 +425,82 @@
     return cv;
   }
 
-  // ---------- ข้อมูลส่วนตัว / ลบข้อมูล ----------
-  function privacy() {
+  // ---------- ข้อมูลของฉัน / ดาวน์โหลด / ลบข้อมูล ----------
+  const GENDER_TH = { male: 'ชาย', female: 'หญิง', other: 'อื่น ๆ' };
+  async function privacy() {
+    loading();
+    let d;
+    try { d = await api('my_data'); }
+    catch (e) { render(`<div class="card"><h2>ข้อมูลของฉัน</h2>${errHtml(e)}<button id="back">กลับ</button></div>`); on('back', home); return; }
+    const row = (k, v) => `<tr><td class="mute" style="padding:4px 8px 4px 0;white-space:nowrap">${k}</td><td>${esc(v || '-')}</td></tr>`;
     render(`
       <div class="card">
-        <h2>ข้อมูลส่วนตัว</h2>
-        <p>คุณสามารถถอนความยินยอมและขอลบข้อมูลส่วนบุคคลได้ ระบบจะยกเลิกคิวที่รออยู่ ลบผลคัดกรอง และลบชื่อ เลขบัตรประชาชน วันเกิด เบอร์โทรออกจากระบบ
-        (ประวัติการบริจาคจะคงไว้โดยไม่ระบุตัวตนตามข้อกำหนดการเก็บเวชระเบียน)</p>
+        <h2>ข้อมูลของฉัน</h2>
+        <table style="border-collapse:collapse;font-size:15px">
+          ${row('ชื่อ-นามสกุล', d.full_name)}
+          ${row('วันเกิด', d.birth_date ? fmtDate(d.birth_date, { day: 'numeric', month: 'long', year: 'numeric' }) : '')}
+          ${row('เพศ', GENDER_TH[d.gender])}
+          ${row('เบอร์โทร', d.phone)}
+          ${row('เลขบัตรประชาชน', d.cid_last3 ? 'xxxxxxxxxx' + d.cid_last3 : '')}
+          ${row('ยินยอมนโยบายเมื่อ', d.consent_at ? fmtDate(String(d.consent_at).slice(0, 10), { day: 'numeric', month: 'long', year: 'numeric' }) : '')}
+        </table>
+        <p class="mute">เลขบัตรประชาชนแสดงเพียง 3 ตัวท้าย เพื่อความปลอดภัย · คิวที่รออยู่ ${d.pending_count} คิว · ประวัติการบริจาค ${d.donation_count} ครั้ง</p>
+        <button class="secondary" id="edit">แก้ไขข้อมูลส่วนตัว</button>
+        <button class="secondary" id="dl">ดาวน์โหลดข้อมูลของฉัน</button>
+        <div id="dlout"></div>
+      </div>
+      <div class="card">
+        <h2>ไม่ต้องการรับการแจ้งเตือน?</h2>
+        <p class="mute">ไม่จำเป็นต้องลบข้อมูล: หากไม่ต้องการรับข้อความ LINE สามารถปิดการแจ้งเตือนของบัญชีทางการได้ที่ LINE (หน้าแชต → ⋮ → ปิดการแจ้งเตือน) ข้อมูลและประวัติของคุณจะยังอยู่ครบ</p>
+      </div>
+      <div class="card" style="border-color:#e6b3b3">
+        <h2 style="color:#8e1b1b">ลบข้อมูลและถอนความยินยอม</h2>
+        <div class="err" style="background:#fde8e8">
+          <b>โปรดอ่านก่อนดำเนินการ — ย้อนกลับไม่ได้</b>
+          <ul style="margin:6px 0 0;padding-left:20px">
+            <li>ชื่อ เลขบัตรประชาชน วันเกิด เพศ เบอร์โทร และผลคัดกรองของคุณจะถูก<b>ลบถาวรและกู้คืนไม่ได้</b></li>
+            <li>${d.pending_count ? `คิวที่รออยู่ <b>${d.pending_count} คิว</b> จะถูกยกเลิกอัตโนมัติ` : 'คิวที่รออยู่ (ถ้ามี) จะถูกยกเลิกอัตโนมัติ'}</li>
+            <li>คุณจะไม่เห็นประวัติการบริจาคและไม่สามารถพิมพ์ใบเกียรติบัตรในระบบนี้ได้อีก${d.donation_count ? ` (ปัจจุบันมี ${d.donation_count} ครั้ง)` : ''}</li>
+            <li>บันทึกการบริจาคจะถูกเก็บต่อโดย<b>ไม่ระบุตัวตน</b>ตามข้อกำหนดการเก็บบันทึกของโรงพยาบาล</li>
+            <li>หากต้องการใช้งานอีก ต้องกรอกข้อมูลและยินยอมใหม่ทั้งหมด</li>
+          </ul>
+        </div>
+        <p class="mute">แนะนำให้กด "ดาวน์โหลดข้อมูลของฉัน" ด้านบนเก็บไว้ก่อน</p>
+        <label style="display:flex;gap:8px;font-weight:500"><input type="checkbox" id="ack" style="margin-top:4px"> <span>ฉันอ่านและเข้าใจผลที่จะเกิดขึ้นแล้ว ต้องการลบข้อมูลของฉัน</span></label>
         <div id="err"></div>
-        <button id="erase">ถอนความยินยอมและลบข้อมูลของฉัน</button>
+        <button id="erase" disabled style="background:#b71c1c">ลบข้อมูลของฉันถาวร</button>
         <button id="back" class="link">กลับ</button>
       </div>`);
     on('back', home);
-    on('erase', async () => {
-      if (!confirm('ยืนยันลบข้อมูลและถอนความยินยอม? การกระทำนี้ย้อนกลับไม่ได้')) return;
+    on('edit', () => profileForm(true));
+    const ack = document.getElementById('ack'), er = document.getElementById('erase');
+    ack.addEventListener('change', () => { er.disabled = !ack.checked; });
+    on('dl', async () => {
+      const out = document.getElementById('dlout');
       try {
-        await api('erase');
-        render('<div class="card"><h2>ลบข้อมูลเรียบร้อย</h2><p class="mute">หากต้องการใช้งานอีกครั้ง ให้เปิดระบบใหม่และยินยอมนโยบายอีกครั้ง</p></div>');
-        setTimeout(() => liff.closeWindow(), 2500);
-      } catch (e) { showErr(e.message); }
+        const data = await api('my_data_export');
+        const text = JSON.stringify(data, null, 2);
+        let saved = false;
+        try {   // เบราว์เซอร์ใน LINE บางรุ่นไม่รองรับการดาวน์โหลดไฟล์ จึงมีช่องแสดงข้อความสำรองให้คัดลอก
+          const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+          const a = document.createElement('a'); a.href = url; a.download = 'ข้อมูลของฉัน.json'; document.body.appendChild(a); a.click(); a.remove(); saved = true;
+        } catch { /* ใช้ช่องข้อความแทน */ }
+        out.innerHTML = `<p class="mute">${saved ? 'หากไฟล์ไม่ถูกดาวน์โหลด ให้คัดลอกข้อความด้านล่างไปเก็บไว้' : 'คัดลอกข้อความด้านล่างไปเก็บไว้'}</p>
+          <textarea readonly style="width:100%;height:160px;font-size:12px">${esc(text)}</textarea>
+          <p class="mute">ไฟล์นี้มีเลขบัตรประชาชนฉบับเต็ม โปรดเก็บรักษาและไม่ส่งต่อให้ผู้อื่น</p>`;
+      } catch (e) { out.innerHTML = errHtml(e); }
+    });
+    on('erase', async () => {
+      if (!ack.checked) return;
+      if (!confirm('ยืนยันครั้งสุดท้าย: ลบข้อมูลของคุณถาวร?')) return;
+      er.disabled = true;
+      try {
+        const r = await api('erase', { confirm: true });
+        render(`<div class="card"><h2>ลบข้อมูลเรียบร้อยแล้ว</h2>
+          <p>ข้อมูลส่วนบุคคลของคุณถูกลบออกจากระบบแล้ว${r.cancelled ? ` และยกเลิกคิวที่รออยู่ ${r.cancelled} คิว` : ''}</p>
+          <p class="mute">หากต้องการใช้งานอีกครั้ง ให้เปิดระบบใหม่และยินยอมนโยบายอีกครั้ง</p></div>`);
+        setTimeout(() => { try { liff.closeWindow(); } catch { /* ignore */ } }, 3500);
+      } catch (e) { er.disabled = false; showErr(e); }
     });
   }
 
