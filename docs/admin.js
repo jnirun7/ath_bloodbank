@@ -8,7 +8,7 @@
 
   const S = { me: null, tab: 'bookings', view: 'week', date: bkkToday(), year: new Date().getFullYear() };
   const TABS = [['bookings', 'รายการจอง'], ['holidays', 'วันหยุด'], ['slots', 'ช่วงเวลา/ขีดจำกัดคิว'],
-                ['stats', 'สถิติ'], ['export', 'ดาวน์โหลดข้อมูล'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
+                ['usage', 'การใช้เลือด'], ['stats', 'สถิติ'], ['export', 'ดาวน์โหลดข้อมูล'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
   const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['มาบริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const EVENTS = [['booking_created', 'จองใหม่'], ['booking_cancelled', 'ยกเลิกจอง'], ['daily_summary', 'สรุปนัดพรุ่งนี้']];
 
@@ -57,7 +57,7 @@
       <main><div id="msg"></div><div id="view"></div></main>`;
     $('logoutbtn').onclick = async () => { await sb.auth.signOut(); loginView(); };
     document.querySelectorAll('nav button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; shell(); }));
-    ({ bookings, holidays, slots, stats, export: exportTab, search, channels, settings })[S.tab]();
+    ({ bookings, holidays, slots, usage, stats, export: exportTab, search, channels, settings })[S.tab]();
   }
 
   // ---------- 1) รายการจอง: รายสัปดาห์ (ภาพรวม) / รายวัน (เปลี่ยนสถานะ) ----------
@@ -185,6 +185,13 @@
     if (!bkR.data.length) { $('list').textContent = `ไม่มีรายการจองวัน${longDate}`; return; }
     const users = await loadUsers(bkR.data);
 
+    const doneIds = bkR.data.filter((b) => b.status === 'completed').map((b) => b.id);
+    const dons = new Map();
+    if (doneIds.length) {
+      const dr = await sb.from('donation_records').select('booking_id, bag_no, abo, rh, donated_on').in('booking_id', doneIds);
+      if (dr.error) throw dr.error;
+      dr.data.forEach((x) => dons.set(x.booking_id, x));
+    }
     const counts = bkR.data.reduce((a, b) => (a[b.status] = (a[b.status] || 0) + 1, a), {});
     let html = `<p class="mute">${esc(longDate)} · รวม ${bkR.data.length} คิว
       (รอ ${counts.pending || 0} · สำเร็จ ${counts.completed || 0} · ไม่มา ${counts.no_show || 0} · ยกเลิก ${counts.cancelled || 0})</p>
@@ -196,18 +203,56 @@
       for (const b of list) {
         const u = users.get(b.user_id); const [t, c] = STATUS[b.status];
         html += `<tr><td>${esc(u?.full_name || u?.display_name || '(ไม่ระบุ)')}</td><td>${esc(u?.phone || '-')}</td>
-          <td><span class="tag ${c}">${t}</span></td>
+          <td><span class="tag ${c}">${t}</span>${b.status === 'completed' ? bagCell(b.id, dons.get(b.id)) : ''}</td>
           <td><select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
       }
     }
     $('list').className = '';
     $('list').innerHTML = html + '</table>';
+    document.querySelectorAll('#list [data-bag]').forEach((btn) => (btn.onclick = () => {
+      const b = bkR.data.find((x) => x.id === btn.dataset.bag); const u = users.get(b.user_id);
+      donationForm(b.id, u?.full_name || u?.display_name || '', S.date, dons.get(b.id), bookings);
+    }));
     document.querySelectorAll('#list select').forEach((sel) => (sel.onchange = async () => {
       if (sel.value === 'completed' && !confirm('ยืนยัน "มาบริจาคสำเร็จ"? ระบบจะสร้างประวัติและเลขใบเกียรติบัตรให้ผู้บริจาค')) { sel.value = sel.dataset.cur; return; }
       const { error } = await sb.from('bookings').update({ status: sel.value }).eq('id', sel.dataset.id);
       if (error) { sel.value = sel.dataset.cur; return fail(error); }
-      msg('อัปเดตสถานะแล้ว'); bookings();
+      msg('อัปเดตสถานะแล้ว');
+      if (sel.value === 'completed') {   // เปิดฟอร์มกรอกเลขถุง/หมู่เลือด/Rh/วันบริจาคทันที (กด "ข้าม" เพื่อกรอกภายหลังได้)
+        const b = bkR.data.find((x) => x.id === sel.dataset.id); const u = users.get(b.user_id);
+        donationForm(b.id, u?.full_name || u?.display_name || '', S.date, null, bookings);
+      } else bookings();
     }));
+  }
+
+  // ---------- ข้อมูลถุงเลือดของการบริจาคที่สำเร็จ ----------
+  const RH_TH = { pos: 'Rh+', neg: 'Rh−' };
+  const bagCell = (id, d) => `<div class="mute" style="margin-top:4px">${d?.bag_no ? `ถุง ${esc(d.bag_no)} · ${esc(d.abo)} ${RH_TH[d.rh] || ''}` : '<span style="color:var(--warn)">ยังไม่กรอกข้อมูลถุงเลือด</span>'}
+    <button class="btn sec sm" data-bag="${id}">${d?.bag_no ? 'แก้ไข' : 'กรอกข้อมูลถุงเลือด'}</button></div>`;
+  const RPC_ERR = { BAG_INVALID: 'เลขถุงไม่ถูกต้อง (ตัวอักษร/ตัวเลข/ขีด 3-30 ตัว)', BAG_DUPLICATE: 'เลขถุงนี้ถูกใช้กับผู้บริจาคคนอื่นแล้ว — ตรวจสอบเลขถุงอีกครั้ง',
+    ABO_INVALID: 'กรุณาเลือกหมู่เลือด', RH_INVALID: 'กรุณาเลือก Rh', DATE_INVALID: 'วันบริจาคไม่ถูกต้อง (ห้ามเป็นวันในอนาคต)', DONATION_NOT_FOUND: 'ไม่พบรายการบริจาค — ต้องตั้งสถานะ "มาบริจาคสำเร็จ" ก่อน' };
+  const rpcMsg = (e) => RPC_ERR[Object.keys(RPC_ERR).find((k) => (e.message || '').includes(k))] || e.message;
+
+  function donationForm(bookingId, name, bookingDate, d, after) {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = `<div class="card" style="max-width:420px;width:100%">
+      <h2>ข้อมูลถุงเลือด</h2><p class="mute">ผู้บริจาค: ${esc(name || '-')}</p>
+      <div id="fmsg"></div>
+      <label>เลขถุงเลือด <input id="fbag" type="text" maxlength="30" autocomplete="off" value="${esc(d?.bag_no || '')}" style="width:100%"></label>
+      <div class="row" style="margin-top:8px">
+        <label>หมู่เลือด <select id="fabo"><option value="">เลือก</option>${['A', 'B', 'AB', 'O'].map((x) => `<option ${d?.abo === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <label>Rh <select id="frh"><option value="">เลือก</option><option value="pos" ${d?.rh === 'pos' ? 'selected' : ''}>Rh บวก (+)</option><option value="neg" ${d?.rh === 'neg' ? 'selected' : ''}>Rh ลบ (−)</option></select></label></div>
+      <label>วันบริจาคจริง <input id="fdate" type="date" max="${bkkToday()}" value="${d?.donated_on || (bookingDate <= bkkToday() ? bookingDate : bkkToday())}"></label>
+      <div class="row" style="margin-top:12px"><button class="btn" id="fsave">บันทึก</button><button class="btn sec" id="fskip">${d ? 'ปิด' : 'ข้าม (กรอกภายหลัง)'}</button></div></div>`;
+    document.body.appendChild(m);
+    const close = () => { m.remove(); after(); };
+    $('fskip').onclick = close;
+    $('fsave').onclick = async () => {
+      const { error } = await sb.rpc('save_donation_details', { p_booking: bookingId, p_bag: $('fbag').value, p_abo: $('fabo').value, p_rh: $('frh').value, p_donated_on: $('fdate').value });
+      if (error) { $('fmsg').innerHTML = `<div class="msg err">${esc(rpcMsg(error))}</div>`; return; }
+      m.remove(); msg('บันทึกข้อมูลถุงเลือดแล้ว'); after();
+    };
+    $('fbag').focus();
   }
 
   // ---------- 2) วันหยุด ----------
@@ -479,8 +524,8 @@
       $('dldonations').onclick = (ev) => {
         const r = readRange(); if (!r) return;
         runAdminExport(ev.currentTarget, 'donations', 'export_donations', { p_from: r[0], p_to: r[1] }, `donations_${r[0]}_to_${r[1]}.csv`,
-          ['cid', 'donated_on', 'certificate_no', 'booking_id', 'donor_ref'],
-          (x, ex) => [c(x.cid, { phone: true, excel: ex }), c(x.donated_on), c(x.certificate_no), c(x.booking_id), c(x.donor_ref)], r);
+          ['cid', 'donated_on', 'certificate_no', 'booking_id', 'donor_ref', 'bag_no', 'abo', 'rh'],
+          (x, ex) => [c(x.cid, { phone: true, excel: ex }), c(x.donated_on), c(x.certificate_no), c(x.booking_id), c(x.donor_ref), c(x.bag_no), c(x.abo), c(x.rh === 'pos' ? 'POS' : x.rh === 'neg' ? 'NEG' : '')], r);
       };
     }
     if (isAdmin) loadHist();
@@ -582,6 +627,7 @@
     ['notify_booking_confirm', true,  'ข้อความยืนยันเมื่อจองสำเร็จ', 'ส่ง 1 ข้อความต่อการจอง · แนะนำให้เปิด'],
     ['notify_cancel_confirm',  false, 'ข้อความยืนยันเมื่อผู้บริจาคยกเลิกคิวเอง', 'ผู้บริจาคเห็นผลบนหน้าจอ LIFF อยู่แล้ว จึงมักไม่จำเป็น'],
     ['notify_reminder',        false, 'เตือนล่วงหน้า 1 วันก่อนนัด', 'ช่วยลดคนไม่มาตามนัด แต่ใช้ 1 ข้อความต่อคิว'],
+    ['usage_notice_include_ward', false, 'ใส่ชื่อหอผู้ป่วยในข้อความ "เลือดของคุณถูกใช้แล้ว"', 'ปิดไว้เป็นค่าเริ่มต้น เพราะอาจทำให้ระบุตัวผู้ป่วยได้ — ให้ DPO/ผู้รับผิดชอบยืนยันก่อนเปิด'],
     ['notify_status_change',   false, 'แจ้งเมื่อเจ้าหน้าที่เปลี่ยนสถานะ (สำเร็จ / ยกเลิก / ไม่มา)', 'ผู้บริจาคดูสถานะได้เองในหน้า LIFF > ประวัติ'],
   ];
   const CHANNELS = [
@@ -629,6 +675,189 @@
              : msg(r.response === 'NOT_CONFIGURED' ? 'ยังไม่ได้ตั้ง Secrets ของ MOPH Alert ในฟังก์ชัน' : `ส่งไม่สำเร็จ (HTTP ${r.status ?? res.status}) ${r.response ?? r.error ?? ''}`, true);
       } catch (e) { fail(e); }
     };
+  }
+
+  // ---------- การใช้เลือด: นำเข้าไฟล์ (CSV/Excel) แล้วแจ้งผู้บริจาคว่าเลือดถูกใช้ช่วยชีวิตแล้ว ----------
+  const U_FIELDS = [
+    ['bag_no', 'เลขถุงเลือด *', ['เลขถุง', 'หมายเลขถุง', 'bag', 'unit no', 'unitno', 'donation']],
+    ['request_no', 'เลขที่ใบขอเลือด *', ['ใบขอ', 'เลขที่ขอ', 'request', 'req']],
+    ['used_on', 'วันที่ใช้ *', ['วันที่ใช้', 'วันที่จ่าย', 'used', 'issue', 'จ่าย', 'วันที่']],
+    ['component', 'ชนิดส่วนประกอบเลือด (ถ้ามี)', ['ชนิด', 'ส่วนประกอบ', 'component', 'product', 'prc']],
+    ['ward', 'หอผู้ป่วย (ถ้ามี)', ['หอ', 'ward', 'ตึก']],
+  ];
+  const U = { rows: [], headers: [], map: {}, batch: null };
+
+  // อ่าน CSV (รองรับ BOM, เครื่องหมายคำพูด, คั่นด้วย , ; หรือ Tab)
+  function parseCsv(text) {
+    text = text.replace(/^﻿/, '');
+    const first = text.split(/\r?\n/, 1)[0];
+    const delim = [',', ';', '\t'].map((d) => [d, first.split(d).length]).sort((x, y) => y[1] - x[1])[0][0];
+    const out = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === delim) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); out.push(row); row = []; cell = ''; }
+      else cell += ch;
+    }
+    if (cell !== '' || row.length) { row.push(cell); out.push(row); }
+    return out.filter((r) => r.some((x) => String(x).trim() !== ''));
+  }
+
+  // แปลงวันที่หลายรูปแบบ -> YYYY-MM-DD (รองรับ พ.ศ., dd/mm/yyyy, serial ของ Excel)
+  function parseDateAny(s) {
+    s = String(s ?? '').trim(); if (!s) return null;
+    let y, m, d, x;
+    if ((x = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) [y, m, d] = [x[1], x[2], x[3]];
+    else if ((x = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/))) [d, m, y] = [x[1], x[2], x[3]];
+    else if (/^\d{5}$/.test(s)) { const t = new Date(Date.UTC(1899, 11, 30) + Number(s) * 864e5); [y, m, d] = [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()]; }
+    else return null;
+    y = Number(y); m = Number(m); d = Number(d);
+    if (y < 100) y += 2000; if (y > 2400) y -= 543;
+    const t = new Date(Date.UTC(y, m - 1, d));
+    if (y < 2000 || t.getUTCFullYear() !== y || t.getUTCMonth() !== m - 1 || t.getUTCDate() !== d) return null;
+    return t.toISOString().slice(0, 10);
+  }
+
+  const loadScript = (src) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('โหลดตัวอ่าน Excel ไม่ได้ — ให้บันทึกไฟล์เป็น CSV UTF-8 แล้วลองใหม่')); document.head.appendChild(s); });
+  async function readTable(file) {
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+      const wb = window.XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }).filter((r) => r.some((x) => String(x).trim() !== ''));
+    }
+    return parseCsv(await file.text());
+  }
+
+  const callUsage = async (body) => {
+    const { data: ss } = await sb.auth.getSession();
+    const res = await fetch(`${C.FUNCTIONS_URL}/usage-notify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ss.session.access_token}`, apikey: C.SUPABASE_ANON_KEY }, body: JSON.stringify(body),
+    });
+    const r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 404 ? 'ยังไม่ได้ Deploy ฟังก์ชัน usage-notify (ดูคู่มือ "อัปเดตครั้งที่ 7")' : (r.error || `HTTP ${res.status}`));
+    return r;
+  };
+
+  async function usage() {
+    const t = await sb.from('blood_usage').select('id', { head: true, count: 'exact' });
+    if (t.error) return fail({ message: 'ยังไม่ได้รันไฟล์ usage.sql ใน Supabase (ดูคู่มือ "อัปเดตครั้งที่ 7")' });
+    $('view').innerHTML = `<div class="card"><h2>นำเข้าข้อมูลการใช้เลือด</h2>
+      <p class="mute">เลือกไฟล์ CSV หรือ Excel (.xlsx) จากงานธนาคารเลือด ที่มี <b>เลขถุงเลือด · เลขที่ใบขอเลือด · วันที่ใช้</b> (ชนิดส่วนประกอบ/หอผู้ป่วยเป็นทางเลือก)
+      ระบบจับคู่ผู้บริจาคด้วยเลขถุง · อ่านเฉพาะคอลัมน์ที่เลือกจับคู่ — <b>คอลัมน์อื่น (เช่น HN, ชื่อผู้ป่วย) ไม่ถูกอ่านเก็บ</b></p>
+      <div class="drop"><input type="file" id="ufile" accept=".csv,.txt,.xlsx,.xls"> <button class="btn sec sm" id="utpl">ดาวน์โหลดไฟล์ตัวอย่าง</button></div>
+      <div id="umap"></div></div>
+      <div class="card" id="upend"><h2>รอแจ้งผู้บริจาค</h2><div class="mute">กำลังตรวจสอบ...</div></div>
+      <div class="card"><h2>รายการนำเข้าล่าสุด</h2><div id="ulist" class="mute">กำลังโหลด...</div></div>`;
+    $('utpl').onclick = () => {
+      const blob = new Blob(['﻿bag_no,request_no,used_on,component,ward\r\nA1234567,REQ-001,2026-11-18,PRC,\r\n'], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'blood_usage_template.csv'; a.click();
+    };
+    $('ufile').onchange = async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
+      try {
+        const tbl = await readTable(f);
+        if (tbl.length < 2) return msg('ไฟล์ไม่มีข้อมูล', true);
+        if (tbl.length > 20001) return msg('ไฟล์ใหญ่เกิน 20,000 แถว กรุณาแบ่งไฟล์', true);
+        U.headers = tbl[0].map((h) => String(h).trim()); U.rows = tbl.slice(1); U.map = {}; U.batch = null;
+        U_FIELDS.forEach(([k, , kw]) => {
+          const i = U.headers.findIndex((h) => kw.some((w) => h.toLowerCase().includes(w)));
+          U.map[k] = i >= 0 && !Object.values(U.map).includes(i) ? i : -1;
+        });
+        msg(''); renderMap();
+      } catch (e) { fail(e); }
+    };
+    usageStatus();
+  }
+
+  function mapped() {
+    const g = (r, k) => (U.map[k] >= 0 ? String(r[U.map[k]] ?? '').trim() : '');
+    const ok = [], bad = [];
+    U.rows.forEach((r, i) => {
+      const o = { bag_no: g(r, 'bag_no'), request_no: g(r, 'request_no'), used_on: parseDateAny(g(r, 'used_on')), component: g(r, 'component'), ward: g(r, 'ward') };
+      (o.bag_no && o.request_no && o.used_on ? ok : bad).push(o.bag_no && o.request_no && o.used_on ? o : { ...o, line: i + 2 });
+    });
+    return { ok, bad };
+  }
+
+  function renderMap() {
+    const opts = (sel) => `<option value="-1">— ไม่ใช้ —</option>${U.headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(h || '(คอลัมน์ ' + (i + 1) + ')')}</option>`).join('')}`;
+    const { ok, bad } = mapped();
+    const need = ['bag_no', 'request_no', 'used_on'].every((k) => U.map[k] >= 0);
+    $('umap').innerHTML = `<h3>จับคู่คอลัมน์ในไฟล์ (พบ ${U.rows.length} แถว)</h3>
+      <div class="row">${U_FIELDS.map(([k, label]) => `<label>${esc(label)}<br><select data-m="${k}">${opts(U.map[k])}</select></label>`).join('')}</div>
+      ${need ? `<p>ตรวจแล้ว: <span class="tag ok">ใช้ได้ ${ok.length} แถว</span> ${bad.length ? `<span class="tag bad">ข้าม ${bad.length} แถว (ข้อมูลไม่ครบ/วันที่ไม่ถูกต้อง)</span>` : ''}</p>
+        <div class="tblwrap"><table><tr><th>เลขถุง</th><th>เลขที่ใบขอ</th><th>วันที่ใช้</th><th>ชนิด</th><th>หอผู้ป่วย</th></tr>
+        ${ok.slice(0, 5).map((o) => `<tr><td>${esc(o.bag_no)}</td><td>${esc(o.request_no)}</td><td>${esc(fmt(o.used_on, { day: 'numeric', month: 'short', year: 'numeric' }))}</td><td>${esc(o.component || '-')}</td><td>${esc(o.ward || '-')}</td></tr>`).join('')}</table></div>
+        <p class="mute">ตัวอย่าง 5 แถวแรก — ตรวจว่าวันที่ถูกต้อง (ระบบอ่านปี พ.ศ./ค.ศ. ได้ทั้งคู่)</p>
+        <button class="btn" id="udo" ${ok.length ? '' : 'disabled'}>นำเข้า ${ok.length} แถว</button>`
+        : '<div class="msg err">กรุณาเลือกคอลัมน์ที่มีเครื่องหมาย * ให้ครบทั้ง 3 อย่าง</div>'}
+      <div id="ures"></div>`;
+    document.querySelectorAll('[data-m]').forEach((s) => (s.onchange = () => { U.map[s.dataset.m] = Number(s.value); renderMap(); }));
+    if ($('udo')) $('udo').onclick = doImport;
+  }
+
+  async function doImport() {
+    const { ok } = mapped(); const btn = $('udo'); btn.disabled = true;
+    const batch = crypto.randomUUID(); const tot = { inserted: 0, duplicate: 0, invalid: 0, matched: 0, unmatched: 0 };
+    try {
+      for (let i = 0; i < ok.length; i += 500) {
+        btn.textContent = `กำลังนำเข้า ${Math.min(i + 500, ok.length)}/${ok.length}...`;
+        const { data, error } = await sb.rpc('import_blood_usage', { p_rows: ok.slice(i, i + 500), p_batch: batch });
+        if (error) throw error;
+        Object.keys(tot).forEach((k) => (tot[k] += data[k] || 0));
+      }
+      U.batch = batch;
+      $('ures').innerHTML = `<div class="msg">นำเข้าเสร็จ: เพิ่มใหม่ ${tot.inserted} · ซ้ำ(ข้าม) ${tot.duplicate} · ข้อมูลไม่ถูกต้อง ${tot.invalid} ·
+        จับคู่ผู้บริจาคได้ <b>${tot.matched}</b> · ไม่พบเลขถุงในระบบนี้ ${tot.unmatched}</div>
+        ${tot.unmatched ? '<p class="mute">"ไม่พบเลขถุง" มักเป็นเลือดจากผู้บริจาคที่ไม่ได้จองผ่านระบบนี้ หรือยังไม่ได้กรอกเลขถุงในรายการจอง — กรอกภายหลังแล้วระบบจะจับคู่ให้อัตโนมัติ</p>' : ''}
+        ${S.me.role === 'admin' && tot.inserted ? '<button class="btn sec sm" id="uundo">ยกเลิกชุดนี้ (นำเข้าผิดไฟล์)</button>' : ''}`;
+      btn.remove(); U.rows = []; $('ufile').value = '';
+      if ($('uundo')) $('uundo').onclick = async () => {
+        if (!confirm('ลบรายการของชุดที่เพิ่งนำเข้านี้? (ลบได้เฉพาะรายการที่ยังไม่ได้แจ้งผู้บริจาค)')) return;
+        const r = await sb.rpc('delete_usage_batch', { p_batch: batch });
+        r.error ? fail(r.error) : (msg(`ลบแล้ว ${r.data} รายการ`), usage());
+      };
+      usageStatus();
+    } catch (e) { btn.disabled = false; fail({ message: (e.message || e) + ' — ถ้านำเข้าไปบางส่วนแล้ว ให้ส่งไฟล์เดิมซ้ำได้ ระบบข้ามรายการที่มีอยู่แล้ว' }); }
+  }
+
+  async function usageStatus() {
+    let pend = 0;
+    try { pend = (await callUsage({ action: 'preview' })).pending; } catch (e) { $('upend').innerHTML = `<h2>รอแจ้งผู้บริจาค</h2><div class="msg err">${esc(e.message)}</div>`; }
+    if ($('upend') && !$('upend').querySelector('.err')) {
+      $('upend').innerHTML = `<h2>รอแจ้งผู้บริจาค: ${pend} ราย</h2>
+        <p class="mute">ข้อความ: "เลือดของคุณได้ช่วยชีวิตผู้ป่วยแล้ว — ใบขอเลือดเลขที่ … ใช้เมื่อวันที่ …" (ไม่มีชื่อผู้ป่วย) · ส่งตามช่องทางที่ตั้งไว้ (แท็บ "แจ้งเตือนผู้บริจาค") · ถ้าใช้ LINE จะหักโควตา 1 ข้อความต่อราย · แต่ละรายส่งได้ครั้งเดียว</p>
+        <button class="btn" id="usend" ${pend ? '' : 'disabled'}>ส่งแจ้งเตือนผู้บริจาค ${pend} ราย</button><div id="usres" style="margin-top:8px"></div>`;
+      $('usend').onclick = async () => {
+        if (!confirm(`ส่งข้อความ "เลือดของคุณถูกใช้แล้ว" ให้ผู้บริจาค ${pend} ราย?`)) return;
+        $('usend').disabled = true; const sum = { sent: 0, skipped: 0, failed: 0 };
+        try {
+          for (let guard = 0; guard < 600; guard++) {
+            const r = await callUsage({ action: 'send' });
+            sum.sent += r.sent; sum.skipped += r.skipped; sum.failed += r.failed;
+            $('usres').textContent = `กำลังส่ง... ส่งแล้ว ${sum.sent} · ข้าม ${sum.skipped} · ไม่สำเร็จ ${sum.failed} · คงเหลือ ${r.remaining}`;
+            if (!r.remaining || r.stalled) break;
+          }
+          msg(`เสร็จสิ้น: ส่งแล้ว ${sum.sent} · ข้าม(ผู้บริจาคลบข้อมูลแล้ว) ${sum.skipped} · ไม่สำเร็จ ${sum.failed}${sum.failed ? ' — ตรวจช่องทาง/Secrets แล้วกดส่งใหม่ได้ (รายที่สำเร็จแล้วจะไม่ถูกส่งซ้ำ)' : ''}`, sum.failed > 0);
+        } catch (e) { fail(e); }
+        usageStatus(); usageList();
+      };
+    }
+    usageList();
+  }
+
+  async function usageList() {
+    const { data, error } = await sb.from('blood_usage').select('bag_no, request_no, used_on, component, donation_id, notify_status, created_at').order('created_at', { ascending: false }).limit(50);
+    if (error) return ($('ulist').textContent = error.message);
+    $('ulist').className = '';
+    $('ulist').innerHTML = data.length ? `<div class="tblwrap"><table><tr><th>เลขถุง</th><th>ใบขอเลือด</th><th>วันที่ใช้</th><th>ชนิด</th><th>ผู้บริจาค</th><th>แจ้งแล้ว</th></tr>
+      ${data.map((x) => `<tr><td>${esc(x.bag_no)}</td><td>${esc(x.request_no)}</td><td>${esc(fmt(x.used_on, { day: 'numeric', month: 'short', year: 'numeric' }))}</td><td>${esc(x.component || '-')}</td>
+        <td>${x.donation_id ? '<span class="tag ok">จับคู่แล้ว</span>' : '<span class="tag warn">ไม่พบเลขถุง</span>'}</td>
+        <td>${x.notify_status === 'sent' ? '<span class="tag ok">ส่งแล้ว</span>' : x.notify_status === 'skipped' ? '<span class="tag">ข้าม</span>' : '-'}</td></tr>`).join('')}</table></div>
+      <p class="mute">แสดง 50 รายการล่าสุด</p>` : 'ยังไม่มีข้อมูลการใช้เลือด';
   }
 
   boot();

@@ -64,12 +64,15 @@
   /* --- สวิตช์ตั้งค่า --- */
   label.sw { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); cursor:pointer; }
   label.sw:first-of-type { border-top:0; } label.sw input { margin-top:4px; width:18px; height:18px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .modal .card { margin:0; max-height:92vh; overflow:auto; }
+  .drop { border:2px dashed var(--line); border-radius:12px; padding:14px; background:#faf6f5; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=6"></script>
-<script src="admin.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="admin.js?v=7"></script>
 </body>
 </html>

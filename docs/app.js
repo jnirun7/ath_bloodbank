@@ -353,7 +353,7 @@
       const h = await api('history');
       render(`
         <div class="card"><h2>ประวัติการบริจาค</h2>
-          ${h.donations.length ? h.donations.map((d) => `<p>🩸 ${esc(longDate(d.donated_on))}<br><span class="mute">เลขที่ ${esc(d.certificate_no)}</span>
+          ${h.donations.length ? h.donations.map((d) => `<p>🩸 ${esc(longDate(d.donated_on))}<br><span class="mute">เลขที่ ${esc(d.certificate_no)}</span>${(d.used || []).map((u) => `<br><span style="color:#8e1b1b">❤️ เลือดของคุณถูกใช้ช่วยชีวิตผู้ป่วยแล้ว · ใบขอเลือด ${esc(u.request_no)} · ${esc(fmtDate(u.used_on, { day: 'numeric', month: 'long', year: 'numeric' }))}</span>`).join('')}
               <button class="secondary" data-cert="${esc(d.certificate_no)}" style="margin-top:6px;padding:9px;font-size:14px">ดูใบเกียรติบัตร / บันทึก PDF</button></p>`).join('')
             : '<p class="mute">ยังไม่มีประวัติการบริจาค</p>'}
           <p class="mute">จำนวนครั้งที่บริจาค: ${h.donations.length}</p></div>
