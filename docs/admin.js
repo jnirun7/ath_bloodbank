@@ -9,7 +9,7 @@
   const S = { me: null, tab: 'bookings', view: 'week', date: bkkToday(), year: new Date().getFullYear() };
   const TABS = [['bookings', 'รายการจอง'], ['holidays', 'วันหยุด'], ['slots', 'ช่วงเวลา/ขีดจำกัดคิว'],
                 ['usage', 'การใช้เลือด'], ['stats', 'สถิติ'], ['export', 'ดาวน์โหลดข้อมูล'], ['search', 'ค้นหาผู้บริจาค'], ['channels', 'ห้องแจ้งเตือน (หมอพร้อม)'], ['settings', 'แจ้งเตือนผู้บริจาค (LINE)']];
-  const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['มาบริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
+  const STATUS = { pending: ['รอยืนยัน', 'warn'], confirmed: ['ยืนยัน', 'info'], calling: ['กำลังเรียก', 'call'], completed: ['มาบริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const EVENTS = [['booking_created', 'จองใหม่'], ['booking_cancelled', 'ยกเลิกจอง'], ['daily_summary', 'สรุปนัดพรุ่งนี้']];
 
   // ---------- helpers ----------
@@ -63,7 +63,9 @@
   // ---------- 1) รายการจอง: รายสัปดาห์ (ภาพรวม) / รายวัน (เปลี่ยนสถานะ) ----------
   const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const mondayOf = (iso) => addDays(iso, -((new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7));
-  const ACTIVE = ['pending', 'completed'];                 // นับเป็นคิวที่ใช้ที่นั่งจริง (เหมือนกติกาจองในฐานข้อมูล)
+  // ปุ่มลัดขั้นถัดไปของแต่ละสถานะ: [สถานะถัดไป, ข้อความปุ่ม]
+  const NEXT = { pending: ['confirmed', 'ยืนยัน (มาถึงแล้ว)'], confirmed: ['calling', 'เรียกคิว'], calling: ['completed', 'บริจาคสำเร็จ'] };
+  const ACTIVE = ['pending', 'confirmed', 'calling', 'completed'];                 // นับเป็นคิวที่ใช้ที่นั่งจริง (เหมือนกติกาจองในฐานข้อมูล)
 
   // ดึงชื่อผู้ใช้แยกคำสั่ง (ไม่ใช้การ join ในคำสั่งเดียว)
   async function loadUsers(rows) {
@@ -119,7 +121,7 @@
     const hol = Object.fromEntries(holR.data.map((h) => [h.holiday_date, h.name]));
     const today = bkkToday();
     const nameOf = (b) => users.get(b.user_id)?.full_name || users.get(b.user_id)?.display_name || '(ไม่ระบุ)';
-    const nmList = (list) => list.map((b) => `<div class="nm ${b.status}" title="${esc(STATUS[b.status][0])}">${esc(nameOf(b))}${b.status === 'completed' ? ' ✓' : b.status === 'no_show' ? ' ✗' : ''}</div>`).join('');
+    const nmList = (list) => list.map((b) => `<div class="nm ${b.status}" title="${esc(STATUS[b.status][0])}">${esc(nameOf(b))}${b.status === 'completed' ? ' ✓' : b.status === 'no_show' ? ' ✗' : b.status === 'confirmed' ? ' ●' : b.status === 'calling' ? ' 🔔' : ''}</div>`).join('');
 
     let html = '<div class="wkwrap"><table class="wk"><tr><th class="slt"></th>';
     for (const d of days) {
@@ -178,7 +180,7 @@
 
     const [slotsR, bkR] = await Promise.all([
       sb.from('time_slots').select('id, label').order('start_time'),
-      sb.from('bookings').select('id, user_id, status, time_slot_id').eq('booking_date', S.date),
+      sb.from('bookings').select('id, user_id, status, time_slot_id, queue_no').eq('booking_date', S.date),
     ]);
     for (const r of [slotsR, bkR]) if (r.error) throw r.error;
     const longDate = fmt(S.date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -194,17 +196,17 @@
     }
     const counts = bkR.data.reduce((a, b) => (a[b.status] = (a[b.status] || 0) + 1, a), {});
     let html = `<p class="mute">${esc(longDate)} · รวม ${bkR.data.length} คิว
-      (รอ ${counts.pending || 0} · สำเร็จ ${counts.completed || 0} · ไม่มา ${counts.no_show || 0} · ยกเลิก ${counts.cancelled || 0})</p>
-      <table><tr><th>ชื่อ-นามสกุล</th><th>เบอร์โทร</th><th>สถานะ</th><th>เปลี่ยนสถานะ</th></tr>`;
+      (รอมา ${counts.pending || 0} · ยืนยัน ${counts.confirmed || 0} · กำลังเรียก ${counts.calling || 0} · สำเร็จ ${counts.completed || 0} · ไม่มา ${counts.no_show || 0} · ยกเลิก ${counts.cancelled || 0})</p>
+      <table><tr><th>คิว</th><th>ชื่อ-นามสกุล</th><th>เบอร์โทร</th><th>สถานะ</th><th>เปลี่ยนสถานะ</th></tr>`;
     for (const s of slotsR.data) {
       const list = bkR.data.filter((b) => b.time_slot_id === s.id);
       if (!list.length) continue;
-      html += `<tr><td colspan="4" class="slotname">${esc(s.label)} น.</td></tr>`;
+      html += `<tr><td colspan="5" class="slotname">${esc(s.label)} น.</td></tr>`;
       for (const b of list) {
         const u = users.get(b.user_id); const [t, c] = STATUS[b.status];
-        html += `<tr><td>${esc(u?.full_name || u?.display_name || '(ไม่ระบุ)')}</td><td>${esc(u?.phone || '-')}</td>
+        html += `<tr><td>${b.queue_no ? 'B' + String(b.queue_no).padStart(3, '0') : '-'}</td><td>${esc(u?.full_name || u?.display_name || '(ไม่ระบุ)')}</td><td>${esc(u?.phone || '-')}</td>
           <td><span class="tag ${c}">${t}</span>${b.status === 'completed' ? bagCell(b.id, dons.get(b.id)) : ''}</td>
-          <td><select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
+          <td>${NEXT[b.status] ? `<button class="btn sm" data-next="${b.id}" data-to="${NEXT[b.status][0]}" data-cur="${b.status}">${NEXT[b.status][1]}</button> ` : ''}<select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
       }
     }
     $('list').className = '';
@@ -213,16 +215,18 @@
       const b = bkR.data.find((x) => x.id === btn.dataset.bag); const u = users.get(b.user_id);
       donationForm(b.id, u?.full_name || u?.display_name || '', S.date, dons.get(b.id), bookings);
     }));
-    document.querySelectorAll('#list select').forEach((sel) => (sel.onchange = async () => {
-      if (sel.value === 'completed' && !confirm('ยืนยัน "มาบริจาคสำเร็จ"? ระบบจะสร้างประวัติและเลขใบเกียรติบัตรให้ผู้บริจาค')) { sel.value = sel.dataset.cur; return; }
-      const { error } = await sb.from('bookings').update({ status: sel.value }).eq('id', sel.dataset.id);
-      if (error) { sel.value = sel.dataset.cur; return fail(error); }
+    const setStatus = async (id, to, cur, revert) => {
+      if (to === 'completed' && !confirm('ยืนยัน "มาบริจาคสำเร็จ"? ระบบจะสร้างประวัติและเลขใบเกียรติบัตรให้ผู้บริจาค')) { revert && revert(); return; }
+      const { error } = await sb.from('bookings').update({ status: to }).eq('id', id);
+      if (error) { revert && revert(); return fail(error); }
       msg('อัปเดตสถานะแล้ว');
-      if (sel.value === 'completed') {   // เปิดฟอร์มกรอกเลขถุง/หมู่เลือด/Rh/วันบริจาคทันที (กด "ข้าม" เพื่อกรอกภายหลังได้)
-        const b = bkR.data.find((x) => x.id === sel.dataset.id); const u = users.get(b.user_id);
+      if (to === 'completed') {   // เปิดฟอร์มกรอกเลขถุง/หมู่เลือด/Rh/วันบริจาคทันที (กด "ข้าม" เพื่อกรอกภายหลังได้)
+        const b = bkR.data.find((x) => x.id === id); const u = users.get(b.user_id);
         donationForm(b.id, u?.full_name || u?.display_name || '', S.date, null, bookings);
       } else bookings();
-    }));
+    };
+    document.querySelectorAll('#list [data-next]').forEach((btn) => (btn.onclick = () => setStatus(btn.dataset.next, btn.dataset.to, btn.dataset.cur)));
+    document.querySelectorAll('#list select').forEach((sel) => (sel.onchange = () => setStatus(sel.dataset.id, sel.value, sel.dataset.cur, () => { sel.value = sel.dataset.cur; })));
   }
 
   // ---------- ข้อมูลถุงเลือดของการบริจาคที่สำเร็จ ----------
@@ -406,7 +410,7 @@
   }
 
   // ---------- 4.5) ดาวน์โหลดข้อมูล (รายชื่อผู้จอง) ----------
-  const EXP_STATUS = [['', 'ทุกสถานะ'], ['completed', 'เฉพาะ: มาบริจาคสำเร็จ'], ['pending', 'เฉพาะ: รอยืนยัน'], ['cancelled', 'เฉพาะ: ยกเลิก'], ['no_show', 'เฉพาะ: ไม่มา']];
+  const EXP_STATUS = [['', 'ทุกสถานะ'], ['completed', 'เฉพาะ: มาบริจาคสำเร็จ'], ['pending', 'เฉพาะ: รอยืนยัน'], ['confirmed', 'เฉพาะ: ยืนยัน'], ['calling', 'เฉพาะ: กำลังเรียก'], ['cancelled', 'เฉพาะ: ยกเลิก'], ['no_show', 'เฉพาะ: ไม่มา']];
   const bkkTime = (iso) => (iso ? new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') : '');
 
   async function exportTab() {
@@ -628,13 +632,17 @@
     ['notify_cancel_confirm',  false, 'ข้อความยืนยันเมื่อผู้บริจาคยกเลิกคิวเอง', 'ผู้บริจาคเห็นผลบนหน้าจอ LIFF อยู่แล้ว จึงมักไม่จำเป็น'],
     ['notify_reminder',        false, 'เตือนล่วงหน้า 1 วันก่อนนัด', 'ช่วยลดคนไม่มาตามนัด แต่ใช้ 1 ข้อความต่อคิว'],
     ['usage_notice_include_ward', false, 'ใส่ชื่อหอผู้ป่วยในข้อความ "เลือดของคุณถูกใช้แล้ว"', 'ปิดไว้เป็นค่าเริ่มต้น เพราะอาจทำให้ระบุตัวผู้ป่วยได้ — ให้ DPO/ผู้รับผิดชอบยืนยันก่อนเปิด'],
-    ['notify_status_change',   false, 'แจ้งเมื่อเจ้าหน้าที่เปลี่ยนสถานะ (สำเร็จ / ยกเลิก / ไม่มา)', 'ผู้บริจาคดูสถานะได้เองในหน้า LIFF > ประวัติ'],
+    ['notify_status_change',   false, 'แจ้งเมื่อเจ้าหน้าที่เปลี่ยนสถานะ (ยืนยัน / สำเร็จ / ยกเลิก / ไม่มา)', 'ผู้บริจาคดูสถานะได้เองในหน้า LIFF > ประวัติ'],
+    ['notify_called',          true,  'แจ้ง "ถึงคิวของคุณแล้ว" เมื่อเจ้าหน้าที่กด "เรียกคิว"', 'ผู้บริจาคไม่ต้องเฝ้าหน้าจอทีวี · 1 ข้อความต่อคิว (เปิดไว้เป็นค่าเริ่มต้น)'],
+    ['notify_recall',          true,  'ชวนกลับมาบริจาคเมื่อครบ 3 เดือนนับจากครั้งล่าสุด', 'ส่ง 1 ข้อความต่อผู้บริจาคต่อรอบ (ตรวจทุก 08:00 น.) · ผู้บริจาคปิดรับเองได้ที่ "ข้อมูลของฉัน" · ให้ DPO ยืนยันข้อความก่อนใช้จริง'],
+    ['notify_birthday',        true,  'อวยพรวันเกิดผู้บริจาค + ชวนมาบริจาคเป็นสิริมงคล', 'ส่งปีละ 1 ข้อความ เฉพาะผู้ที่เคยบริจาคสำเร็จและให้ความยินยอมแล้ว · ประหยัดโควตาได้ด้วยช่องทาง MOPH Alert'],
   ];
   const CHANNELS = [
     ['line', 'LINE OA (ใช้โควตาข้อความ push ของ LINE OA)'],
     ['moph_alert', 'MOPH Alert (หมอพร้อม) อย่างเดียว — ไม่ใช้โควตา LINE OA'],
     ['moph_alert_then_line', 'MOPH Alert ก่อน ถ้าส่งไม่สำเร็จค่อยส่งทาง LINE'],
   ];
+  const tvUrl = (t) => (t ? location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '') + 'tv.html?k=' + encodeURIComponent(t) : '(ยังไม่ได้รัน v8.sql)');
   async function settings() {
     const { data, error } = await sb.from('app_settings').select('key, value');
     if (error) return fail({ message: 'อ่านการตั้งค่าไม่ได้ — ยังไม่ได้รันไฟล์ settings.sql ใน Supabase หรือไม่? (' + error.message + ')' });
@@ -651,7 +659,21 @@
       (ตรวจโควตาที่เหลือได้ใน LINE OA Manager) · การแจ้งเจ้าหน้าที่ผ่านหมอพร้อมไม่ใช้โควตานี้และไม่ได้รับผลจากหน้านี้</p>
       ${DONOR_NOTIFY.map(([k, def, label, hint]) => `<label class="sw"><input type="checkbox" data-key="${k}" ${(k in cur ? cur[k] : def) ? 'checked' : ''}>
         <span><b>${esc(label)}</b><br><small class="mute">${esc(hint)}</small></span></label>`).join('')}
-      <div class="row" style="margin-top:12px"><button class="btn" id="savesettings">บันทึกการตั้งค่า</button></div></div>`;
+      <div class="row" style="margin-top:12px"><button class="btn" id="savesettings">บันทึกการตั้งค่า</button></div></div>
+      <div class="card"><h2>หน้าจอทีวี / มอนิเตอร์ห้องรอ</h2>
+      <p class="mute">เปิดลิงก์นี้ในเบราว์เซอร์ของเครื่องที่ต่อทีวี แล้วกด F11 (เต็มจอ) · แสดงเฉพาะหมายเลขคิว และชื่อต้น+อักษรย่อนามสกุลของผู้ที่ติ๊กยินยอมเท่านั้น
+      (ไม่มีเลขบัตร เบอร์โทร หมู่เลือด) · ใครมีลิงก์ก็เปิดดูได้ จึงไม่ควรเผยแพร่ลิงก์ — ถ้าหลุดให้กด "สร้างลิงก์ใหม่"</p>
+      <input id="tvlink" type="text" readonly style="width:100%" value="${esc(tvUrl(raw.tv_token))}">
+      <div class="row" style="margin-top:10px"><button class="btn sec sm" id="tvcopy">คัดลอกลิงก์</button>
+        <a class="btn sec sm" id="tvopen" href="${esc(tvUrl(raw.tv_token))}" target="_blank" rel="noopener">เปิดดูตัวอย่าง</a>
+        <button class="btn sec sm" id="tvreset">สร้างลิงก์ใหม่</button></div></div>`;
+    $('tvcopy').onclick = async () => { try { await navigator.clipboard.writeText($('tvlink').value); msg('คัดลอกแล้ว'); } catch { $('tvlink').select(); msg('กด Ctrl+C เพื่อคัดลอก'); } };
+    $('tvreset').onclick = async () => {
+      if (!confirm('สร้างลิงก์ใหม่? ลิงก์เดิมที่เปิดอยู่บนทีวีจะใช้ไม่ได้ ต้องเปิดลิงก์ใหม่บนเครื่องทีวี')) return;
+      const t = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, '0')).join('');
+      const { error: e } = await sb.from('app_settings').upsert({ key: 'tv_token', value: t }, { onConflict: 'key' });
+      e ? fail(e) : (msg('สร้างลิงก์ใหม่แล้ว'), settings());
+    };
     $('savesettings').onclick = async () => {
       const rows = [...document.querySelectorAll('[data-key]')].map((c) => ({ key: c.dataset.key, value: c.checked ? 'true' : 'false' }));
       rows.push({ key: 'donor_channel', value: $('donorch').value });

@@ -21,7 +21,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtDate = (d, o) => new Date(d + 'T00:00:00Z').toLocaleDateString('th-TH', { timeZone: 'UTC', ...o });
   const longDate = (d) => fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const STATUS = { pending: ['รอยืนยัน', 'warn'], completed: ['บริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
+  const STATUS = { pending: ['รอยืนยัน', 'warn'], confirmed: ['ยืนยันแล้ว', 'ok'], calling: ['ถึงคิวแล้ว', 'ok'], completed: ['บริจาคสำเร็จ', 'ok'], cancelled: ['ยกเลิก', 'bad'], no_show: ['ไม่มา', 'bad'] };
   const render = (html) => { app.innerHTML = html; window.scrollTo(0, 0); };
   const loading = (t = 'กำลังโหลด...') => render(`<div class="center">${esc(t)}</div>`);
   const todayBkk = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
@@ -99,7 +99,7 @@
           โรงพยาบาลอ่างทองเก็บ ชื่อ-นามสกุล เลขบัตรประชาชน วันเกิด เพศ เบอร์โทร LINE User ID ข้อมูลการจองคิว ผลคัดกรองเพียง "ผ่าน/ไม่ผ่าน" และประวัติการบริจาค
           เพื่อ ยืนยันตัวตน จองคิว แจ้งเตือน ออกใบเกียรติบัตร และบันทึกประวัติผู้บริจาคของธนาคารเลือดเท่านั้น
           เลขบัตรประชาชนเข้าถึงได้เฉพาะผู้ดูแลระบบที่ได้รับมอบหมาย ระบบ<b>ไม่เก็บ</b>คำตอบด้านสุขภาพรายข้อ
-          คุณถอนความยินยอมและลบข้อมูลได้ทุกเมื่อที่เมนู "ข้อมูลส่วนตัว"</div>
+          คุณถอนความยินยอมและลบข้อมูลได้ทุกเมื่อที่เมนู "ข้อมูลของฉัน"</div>
         <div class="disclaimer">${NOT_CERT}<br>${DISCLAIMER}</div>
         <label style="display:flex;gap:8px;align-items:flex-start;font-weight:500"><input id="ok" type="checkbox" style="margin-top:5px">
           <span>ข้าพเจ้าได้อ่านและยินยอมให้เก็บ ใช้ ข้อมูลตามนโยบายนี้</span></label>
@@ -150,11 +150,13 @@
       <div class="card">
         <h2>สวัสดี ${esc(state.me.full_name || '')}</h2>
         ${b ? `
-          <p>คิวของคุณ <span class="tag warn">รอยืนยัน</span></p>
+          <p>คิวของคุณ <span class="tag ${STATUS[b.status]?.[1] || 'warn'}">${esc(STATUS[b.status]?.[0] || 'รอยืนยัน')}</span></p>
           <p><b>${esc(longDate(b.booking_date))}</b><br>เวลา ${esc(b.time_slots?.label)} น.</p>
-          <p class="mute">กรุณาตรวจสุขภาพตัวเองอีกครั้งก่อนมา และหากไม่สบายให้ยกเลิกคิว</p>
-          <button id="cancel" class="secondary">ยกเลิกคิวนี้</button>
-        ` : `<p class="mute">คุณยังไม่มีคิวที่รออยู่</p>
+          ${b.status === 'calling' ? `<p style="font-size:20px"><b>🔔 ถึงคิวของคุณแล้ว${b.queue ? ' (' + esc(b.queue) + ')' : ''}</b><br>เชิญที่ห้องเจาะเลือดได้เลยค่ะ</p>`
+            : b.status === 'confirmed' ? `<p><b>✅ ยืนยันการมาถึงแล้ว${b.queue ? ' · หมายเลขคิว ' + esc(b.queue) : ''}</b><br>กรุณานั่งรอสักครู่ ธนาคารเลือดจะเรียกคิวของคุณ</p>`
+            : `<p class="mute">กรุณาตรวจสุขภาพตัวเองอีกครั้งก่อนมา และหากไม่สบายให้ยกเลิกคิว</p>`}
+          ${b.status === 'pending' ? '<button id="cancel" class="secondary">ยกเลิกคิวนี้</button>' : ''}
+        ` : `${nextDonationCard()}
           <button id="book">จองคิวบริจาคเลือด</button>`}
         <div id="err"></div>
       </div>
@@ -172,6 +174,17 @@
       if (!confirm('ยืนยันยกเลิกคิวนี้?')) return;
       try { await api('cancel', { booking_id: b.id }); await refreshMe(); home(); } catch (e) { showErr(e.message); }
     });
+  }
+
+  // การ์ดบนหน้าแรกเมื่อไม่มีคิว: ขอบคุณ + จำนวนครั้ง + วันที่บริจาคได้ครั้งถัดไป (ชวนให้อยากกลับมา)
+  function nextDonationCard() {
+    const m = state.me, n = m.donation_count || 0;
+    if (!n || !m.last_donated) return '<p class="mute">คุณยังไม่มีคิวที่รออยู่ — มาร่วมเป็นส่วนหนึ่งของการช่วยชีวิตผู้ป่วยกันนะคะ 💛</p>';
+    const d = new Date(m.last_donated + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + 3);
+    const next = d.toISOString().slice(0, 10);
+    const ready = next <= todayBkk();
+    return `<p>ขอบคุณที่บริจาคเลือดแล้ว <b>${n} ครั้ง</b> 💛<br><span class="mute">เลือด 1 ถุงช่วยชีวิตผู้ป่วยได้สูงสุด 3 คน</span></p>
+      <p>${ready ? '🩸 <b>ตอนนี้คุณพร้อมบริจาคครั้งต่อไปแล้ว</b>' : `บริจาคครั้งต่อไปได้ตั้งแต่ <b>${esc(longDate(next))}</b>`}</p>`;
   }
 
   // ---------- 2) คัดกรอง ----------
@@ -450,6 +463,14 @@
         <div id="dlout"></div>
       </div>
       <div class="card">
+        <h2>ตั้งค่าความยินยอมเพิ่มเติม</h2>
+        <label style="display:flex;gap:8px;font-weight:500"><input type="checkbox" id="pshow" ${d.show_name_on_screen ? 'checked' : ''} style="margin-top:4px">
+          <span>ยินดีให้แสดง<b>ชื่อต้นและอักษรย่อนามสกุล</b> (เช่น "คุณสมชาย ส.") บนหน้าจอทีวีของธนาคารเลือดตอนเรียกคิว/ขอบคุณ — ถ้าไม่ติ๊ก จะแสดงเฉพาะหมายเลขคิว</span></label>
+        <label style="display:flex;gap:8px;font-weight:500;margin-top:10px"><input type="checkbox" id="popt" ${d.recall_optout ? 'checked' : ''} style="margin-top:4px">
+          <span>ไม่ต้องการรับข้อความชวนกลับมาบริจาคเมื่อครบ 3 เดือน และข้อความอวยพรวันเกิด</span></label>
+        <div id="pmsg" class="mute" style="min-height:20px"></div>
+      </div>
+      <div class="card">
         <h2>ไม่ต้องการรับการแจ้งเตือน?</h2>
         <p class="mute">ไม่จำเป็นต้องลบข้อมูล: หากไม่ต้องการรับข้อความ LINE สามารถปิดการแจ้งเตือนของบัญชีทางการได้ที่ LINE (หน้าแชต → ⋮ → ปิดการแจ้งเตือน) ข้อมูลและประวัติของคุณจะยังอยู่ครบ</p>
       </div>
@@ -472,6 +493,9 @@
         <button id="back" class="link">กลับ</button>
       </div>`);
     on('back', home);
+    const savePref = async (patch) => { try { await api('prefs', patch); document.getElementById('pmsg').textContent = 'บันทึกแล้ว ✓'; await refreshMe(); } catch (e) { document.getElementById('pmsg').textContent = e.message; } };
+    document.getElementById('pshow').onchange = (ev) => savePref({ show_name_on_screen: ev.target.checked });
+    document.getElementById('popt').onchange = (ev) => savePref({ recall_optout: ev.target.checked });
     on('edit', () => profileForm(true));
     const ack = document.getElementById('ack'), er = document.getElementById('erase');
     ack.addEventListener('change', () => { er.disabled = !ack.checked; });

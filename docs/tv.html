@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>หน้าจอธนาคารเลือด รพ.อ่างทอง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@500;700;800&family=Sarabun:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+/* ====== โทนสี: แล็กเกอร์แดงเลือดหมู + ทองคำเปลว (แรงบันดาลใจจากงานลายรดน้ำ) ======
+   แก้สีทั้งหมดได้ที่นี่ที่เดียว */
+:root {
+  --lacquer: #2c050d;      /* พื้นหลังเข้มสุด */
+  --garnet:  #5a0c1e;      /* พื้นหลังแผง */
+  --blood:   #b3132f;      /* แดงเลือด ใช้เฉพาะจุดสำคัญ */
+  --gold:    #e9bf6b;      /* ทองคำเปลว */
+  --gold-d:  #b98a38;
+  --ivory:   #fff4e0;      /* ตัวอักษรหลัก */
+  --mist:    #e8bfc1;      /* ตัวอักษรรอง */
+  --u: min(calc(100vw / 192), calc(100vh / 108));   /* 1u = 1/192 ของความกว้างจอ 16:9 */
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--lacquer); cursor: none; }
+body { font-family: 'Sarabun', 'Noto Sans Thai', sans-serif; color: var(--ivory); }
+.serif { font-family: 'Noto Serif Thai', 'Sarabun', serif; }
+
+#stage {
+  position: absolute; left: 50%; top: 50%; width: calc(var(--u) * 192); height: calc(var(--u) * 108);
+  transform: translate(-50%, -50%); overflow: hidden;
+  background:
+    radial-gradient(ellipse at 18% 12%, #7c1228 0%, transparent 55%),
+    radial-gradient(ellipse at 88% 92%, #6b0f22 0%, transparent 50%),
+    linear-gradient(160deg, var(--garnet), var(--lacquer) 70%);
+}
+/* แสงนุ่ม ๆ ค่อยเคลื่อนช้า ๆ (การเคลื่อนไหวเดียวของพื้นหลัง) */
+#stage::before {
+  content: ''; position: absolute; inset: -20%; pointer-events: none;
+  background: radial-gradient(circle at 30% 40%, rgba(233,191,107,.10), transparent 40%);
+  animation: drift 40s ease-in-out infinite alternate;
+}
+@keyframes drift { to { transform: translate(18%, 10%); } }
+
+/* กรอบทอง 2 ชั้น + ลายมุม */
+.frame { position: absolute; inset: calc(var(--u) * 1.6); border: 1px solid rgba(233,191,107,.55); pointer-events: none; }
+.frame::after { content: ''; position: absolute; inset: calc(var(--u) * .6); border: 1px solid rgba(233,191,107,.25); }
+.corner { position: absolute; width: calc(var(--u) * 6); height: calc(var(--u) * 6); color: var(--gold); pointer-events: none; }
+.corner.tl { left: calc(var(--u) * 1.1); top: calc(var(--u) * 1.1); }
+.corner.tr { right: calc(var(--u) * 1.1); top: calc(var(--u) * 1.1); transform: scaleX(-1); }
+.corner.bl { left: calc(var(--u) * 1.1); bottom: calc(var(--u) * 1.1); transform: scaleY(-1); }
+.corner.br { right: calc(var(--u) * 1.1); bottom: calc(var(--u) * 1.1); transform: scale(-1); }
+
+header { position: absolute; left: calc(var(--u) * 6); right: calc(var(--u) * 6); top: calc(var(--u) * 4); height: calc(var(--u) * 12); display: flex; align-items: center; gap: calc(var(--u) * 2.4); }
+.logo { width: calc(var(--u) * 8); height: calc(var(--u) * 8); flex: none; animation: beat 2.4s ease-in-out infinite; transform-origin: 50% 60%; }
+@keyframes beat { 0%, 100% { transform: scale(1); } 12% { transform: scale(1.07); } 24% { transform: scale(1); } 36% { transform: scale(1.04); } }
+.brand h1 { font-size: calc(var(--u) * 3.6); font-weight: 800; color: var(--gold); line-height: 1.15; letter-spacing: .01em; }
+.brand p { font-size: calc(var(--u) * 1.9); color: var(--mist); margin-top: calc(var(--u) * .3); }
+.clock { margin-left: auto; text-align: right; }
+.clock b { display: block; font-size: calc(var(--u) * 5.4); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--ivory); }
+.clock span { font-size: calc(var(--u) * 1.8); color: var(--mist); }
+
+main { position: absolute; left: calc(var(--u) * 6); right: calc(var(--u) * 6); top: calc(var(--u) * 19); bottom: calc(var(--u) * 15); display: grid; grid-template-columns: 1fr calc(var(--u) * 64); gap: calc(var(--u) * 4); }
+
+/* ----- เวทีเรื่องราว (ซ้าย) ----- */
+#story { position: relative; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 calc(var(--u) * 3); }
+#slide { width: 100%; transition: opacity .7s ease, transform .7s ease; }
+#slide.out { opacity: 0; transform: translateY(calc(var(--u) * 1.2)); }
+.hero { font-size: calc(var(--u) * 12); font-weight: 800; line-height: 1.2; color: var(--gold); }
+.lead { font-size: calc(var(--u) * 3.4); line-height: 1.5; margin-top: calc(var(--u) * 2.4); }
+.sub { font-size: calc(var(--u) * 2.4); color: var(--mist); margin-top: calc(var(--u) * 1.6); line-height: 1.55; }
+.bignum { font-size: calc(var(--u) * 22); font-weight: 800; line-height: 1; color: var(--gold); font-variant-numeric: tabular-nums; }
+.rule { width: calc(var(--u) * 14); height: 1px; background: var(--gold); margin: calc(var(--u) * 2.6) auto; opacity: .7; }
+.trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--u) * 2); margin-top: calc(var(--u) * 4); }
+.trio div { border-top: 1px solid rgba(233,191,107,.5); padding-top: calc(var(--u) * 1.4); }
+.trio b { display: block; font-size: calc(var(--u) * 7); font-weight: 800; color: var(--ivory); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.trio span { font-size: calc(var(--u) * 2.2); color: var(--mist); }
+.names { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--u) * 1.4) calc(var(--u) * 3.2); margin-top: calc(var(--u) * 3.4); font-size: calc(var(--u) * 3.6); font-weight: 600; }
+.names i { font-style: normal; color: var(--gold); margin-right: .35em; }
+.miles { margin-top: calc(var(--u) * 3.4); font-size: calc(var(--u) * 2.8); color: var(--gold); line-height: 1.7; }
+.reasons { text-align: left; margin: calc(var(--u) * 3) auto 0; max-width: calc(var(--u) * 100); }
+.reasons p { font-size: calc(var(--u) * 3.2); line-height: 1.5; padding: calc(var(--u) * 1.5) 0; border-bottom: 1px solid rgba(233,191,107,.3); }
+.reasons p:last-child { border-bottom: 0; }
+.qrwrap { display: flex; align-items: center; justify-content: center; gap: calc(var(--u) * 6); }
+.qrbox { background: var(--ivory); padding: calc(var(--u) * 1.6); border-radius: calc(var(--u) * .8); width: calc(var(--u) * 26); height: calc(var(--u) * 26); }
+.qrbox svg, .qrbox img { width: 100%; height: 100%; display: block; }
+.qrtext { text-align: left; max-width: calc(var(--u) * 56); }
+
+/* ----- แผงคิว (ขวา) ----- */
+#queue { display: flex; flex-direction: column; gap: calc(var(--u) * 2.4); min-height: 0; }
+.plaque { position: relative; border: 1px solid var(--gold); background: linear-gradient(180deg, rgba(122,15,31,.85), rgba(60,8,20,.9)); padding: calc(var(--u) * 2.2) calc(var(--u) * 3); }
+.plaque::before { content: ''; position: absolute; inset: calc(var(--u) * .5); border: 1px solid rgba(233,191,107,.3); pointer-events: none; }
+.plaque h2 { font-size: calc(var(--u) * 2.4); font-weight: 600; color: var(--gold); }
+.callno { font-size: calc(var(--u) * 15); font-weight: 800; line-height: 1.05; color: var(--ivory); letter-spacing: .02em; text-align: center; margin-top: calc(var(--u) * .6); }
+.callname { text-align: center; font-size: calc(var(--u) * 3); font-weight: 600; min-height: calc(var(--u) * 4.4); color: var(--gold); }
+.callgo { text-align: center; font-size: calc(var(--u) * 2.2); color: var(--mist); }
+.plaque.live { animation: glow 2.2s ease-in-out infinite; }
+@keyframes glow { 0%, 100% { box-shadow: 0 0 0 rgba(233,191,107,0); } 50% { box-shadow: 0 0 calc(var(--u) * 3.5) rgba(233,191,107,.45); } }
+.plaque.idle .callno { color: rgba(255,244,224,.28); font-size: calc(var(--u) * 9); padding: calc(var(--u) * 2) 0; }
+.also { display: flex; gap: calc(var(--u) * 2.4); justify-content: center; margin-top: calc(var(--u) * 1.4); font-size: calc(var(--u) * 2.6); color: var(--mist); }
+.also b { color: var(--gold); font-size: calc(var(--u) * 3.2); }
+.waitbox { flex: 1; min-height: 0; padding: 0 calc(var(--u) * .4); display: flex; flex-direction: column; }
+.waitbox h2 { font-size: calc(var(--u) * 2.4); font-weight: 600; color: var(--gold); padding-bottom: calc(var(--u) * 1); border-bottom: 1px solid rgba(233,191,107,.5); }
+.wait { flex: 1; overflow: hidden; }
+.wait .r { display: flex; align-items: baseline; gap: calc(var(--u) * 2); padding: calc(var(--u) * 1.1) 0; border-bottom: 1px solid rgba(233,191,107,.18); font-size: calc(var(--u) * 3); }
+.wait .r b { font-weight: 800; color: var(--gold); min-width: calc(var(--u) * 9); font-variant-numeric: tabular-nums; }
+.wait .r span { color: var(--ivory); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait .none { color: var(--mist); font-size: calc(var(--u) * 2.4); padding: calc(var(--u) * 2) 0; line-height: 1.6; }
+.counts { font-size: calc(var(--u) * 2.2); color: var(--mist); padding-top: calc(var(--u) * 1); border-top: 1px solid rgba(233,191,107,.5); }
+
+/* ----- แถบล่าง ----- */
+footer { position: absolute; left: calc(var(--u) * 6); right: calc(var(--u) * 6); bottom: calc(var(--u) * 4); height: calc(var(--u) * 8); border-top: 1px solid rgba(233,191,107,.5); display: flex; align-items: center; overflow: hidden; }
+.ticker { white-space: nowrap; font-size: calc(var(--u) * 2.9); color: var(--ivory); animation: tick 70s linear infinite; padding-left: 100%; }
+.ticker i { font-style: normal; color: var(--gold); margin: 0 calc(var(--u) * 2.4); }
+@keyframes tick { to { transform: translateX(-100%); } }
+
+/* ----- ประกาศเรียกคิว (เต็มจอ) / ต้อนรับ ----- */
+#call { position: absolute; inset: 0; background: rgba(28,3,9,.94); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; opacity: 0; pointer-events: none; transition: opacity .5s; z-index: 5; }
+#call.on { opacity: 1; }
+#call small { font-size: calc(var(--u) * 4); color: var(--gold); }
+#call .n { font-size: calc(var(--u) * 34); font-weight: 800; line-height: 1.05; color: var(--ivory); letter-spacing: .03em; }
+#call .m { font-size: calc(var(--u) * 6); font-weight: 600; color: var(--gold); margin-top: calc(var(--u) * 1); min-height: calc(var(--u) * 8); }
+#call .g { font-size: calc(var(--u) * 4.4); margin-top: calc(var(--u) * 2); }
+#call.on .n { animation: pop .8s cubic-bezier(.2,1.4,.4,1); }
+@keyframes pop { from { transform: scale(.6); opacity: 0; } }
+#welcome { position: absolute; left: calc(var(--u) * 8); bottom: calc(var(--u) * 14); background: var(--ivory); color: var(--lacquer); padding: calc(var(--u) * 1.6) calc(var(--u) * 3.2); font-size: calc(var(--u) * 2.8); font-weight: 600; border-left: calc(var(--u) * .7) solid var(--gold-d); opacity: 0; transform: translateY(calc(var(--u) * 2)); transition: opacity .6s, transform .6s; z-index: 4; max-width: calc(var(--u) * 100); }
+#welcome.on { opacity: 1; transform: none; }
+#status { position: absolute; right: calc(var(--u) * 3.4); bottom: calc(var(--u) * 2.6); font-size: calc(var(--u) * 1.5); color: var(--mist); z-index: 6; }
+#status.bad { color: #ff9b9b; }
+#bad { position: absolute; inset: 0; z-index: 9; display: none; align-items: center; justify-content: center; text-align: center; background: var(--lacquer); font-size: calc(var(--u) * 3.4); line-height: 1.6; padding: 10%; }
+@media (prefers-reduced-motion: reduce) { .ticker, .logo, .plaque.live, #stage::before { animation: none; } .ticker { padding-left: 0; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="orn" viewBox="0 0 60 60" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <path d="M2 2H34M2 2V34"/><path d="M9 9H24C30 9 31 15 26 16C22 17 21 12 25 12M9 9V24C9 30 15 31 16 26C17 22 12 21 12 25"/>
+    <circle cx="38" cy="38" r="2" fill="currentColor"/><path d="M34 2c4 6 8 8 14 8M2 34c6 4 8 8 8 14" opacity=".7"/>
+  </symbol>
+</defs></svg>
+
+<div id="stage">
+  <div class="frame"></div>
+  <svg class="corner tl"><use href="#orn"/></svg><svg class="corner tr"><use href="#orn"/></svg>
+  <svg class="corner bl"><use href="#orn"/></svg><svg class="corner br"><use href="#orn"/></svg>
+
+  <header>
+    <svg class="logo" viewBox="0 0 64 64" fill="none" stroke="#e9bf6b" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true">
+      <path d="M32 5C32 5 12 26 12 40a20 20 0 0040 0C52 26 32 5 32 5z" fill="#b3132f"/>
+      <path d="M32 46c-7-5-10-8-10-12 0-3 2-5 5-5 2 0 4 1 5 3 1-2 3-3 5-3 3 0 5 2 5 5 0 4-3 7-10 12z" fill="#fff4e0" stroke="none"/>
+    </svg>
+    <div class="brand"><h1 class="serif">ธนาคารเลือด โรงพยาบาลอ่างทอง</h1><p>ขอบคุณที่ร่วมเป็นส่วนหนึ่งของการส่งต่อชีวิต</p></div>
+    <div class="clock"><b id="clk">--:--</b><span id="dt"></span></div>
+  </header>
+
+  <main>
+    <section id="story"><div id="slide"></div></section>
+    <aside id="queue">
+      <div id="callbox" class="plaque idle"></div>
+      <div class="waitbox"><h2 class="serif">คิวถัดไป</h2><div class="wait" id="wait"></div><div class="counts" id="counts"></div></div>
+    </aside>
+  </main>
+
+  <footer><div class="ticker" id="ticker"></div></footer>
+
+  <div id="welcome"></div>
+  <div id="call"><small class="serif">ขอเชิญคิวหมายเลข</small><div class="n" id="cn"></div><div class="m" id="cm"></div><div class="g serif">เข้าห้องเจาะเลือด ขอบคุณที่มาบริจาคเลือดค่ะ</div></div>
+  <div id="status">เชื่อมต่อแล้ว</div>
+  <div id="bad"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="qrcode.js"></script>
+<script>
+(() => {
+  'use strict';
+  const C = window.CONFIG || {};
+  const Q = new URLSearchParams(location.search);
+  const K = Q.get('k') || '';
+  const DEMO = Q.get('demo') === '1';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const SLIDE_MS = Number(Q.get('slide')) || 14000;   // เวลาแสดงแต่ละหน้า (มิลลิวินาที)
+  const POLL_MS = 8000;
+  const th = (n) => Number(n || 0).toLocaleString('th-TH');
+
+  // ===== ข้อความขอบคุณที่แสดงที่แถบล่าง — แก้ไขได้ตามต้องการ =====
+  const TICKER = [
+    'ขอบคุณผู้บริจาคทุกท่านที่มอบโอกาสให้ผู้ป่วยได้ไปต่อ',
+    'เลือด 1 ถุง ช่วยชีวิตผู้ป่วยได้สูงสุด 3 คน',
+    'ยินดีต้อนรับทุกท่านสู่ธนาคารเลือด โรงพยาบาลอ่างทอง',
+    'บริจาคเลือดได้ทุก 3 เดือน ครั้งต่อไปจองคิวล่วงหน้าผ่าน LINE ได้เลย',
+    'การให้ครั้งนี้ ส่งต่อไปถึงใครบางคนที่รอคอยอยู่',
+  ];
+
+  let D = null, prev = null, sIdx = -1, timer = null, audio = null;
+
+  // ---------- นาฬิกา ----------
+  function tickClock() {
+    const now = new Date();
+    $('clk').textContent = now.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
+    $('dt').textContent = now.toLocaleDateString('th-TH-u-ca-buddhist', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  }
+  setInterval(tickClock, 1000); tickClock();
+
+  // ---------- เสียงกริ่ง (เบราว์เซอร์อนุญาตหลังมีการคลิก/กดแป้นอย่างน้อย 1 ครั้ง หรือเปิดด้วย --autoplay-policy=no-user-gesture-required) ----------
+  const arm = () => { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) { /* ไม่มีเสียง */ } };
+  addEventListener('click', arm); addEventListener('keydown', arm);
+  if (Q.get('sound') === '1') arm();
+  function chime() {
+    if (!audio || audio.state !== 'running') return;
+    [[880, 0], [1175, .22], [1480, .44]].forEach(([f, t]) => {
+      const o = audio.createOscillator(), g = audio.createGain(), s = audio.currentTime + t;
+      o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(.18, s + .03); g.gain.exponentialRampToValueAtTime(.0001, s + 1.2);
+      o.connect(g); g.connect(audio.destination); o.start(s); o.stop(s + 1.3);
+    });
+  }
+
+  // ---------- แผงคิว ----------
+  function renderQueue() {
+    const c = D.calling || [], w = D.waiting || [];
+    const box = $('callbox');
+    if (c.length) {
+      const f = c[0];
+      box.className = 'plaque live';
+      box.innerHTML = `<h2 class="serif">กำลังเรียกคิว</h2><div class="callno">${esc(f.queue)}</div>
+        <div class="callname">${esc(f.name || '')}</div><div class="callgo">เชิญที่ห้องเจาะเลือด</div>
+        ${c.length > 1 ? `<div class="also">${c.slice(1, 4).map((x) => `<span>เรียกแล้ว <b>${esc(x.queue)}</b></span>`).join('')}</div>` : ''}`;
+    } else {
+      box.className = 'plaque idle';
+      box.innerHTML = `<h2 class="serif">กำลังเรียกคิว</h2><div class="callno">—</div><div class="callgo">เจ้าหน้าที่จะเรียกตามลำดับคิว</div>`;
+    }
+    $('wait').innerHTML = w.length
+      ? w.slice(0, 6).map((x) => `<div class="r"><b>${esc(x.queue)}</b><span>${esc(x.name || 'ผู้ใจบุญท่านหนึ่ง')}</span></div>`).join('')
+      : `<div class="none">ยังไม่มีผู้รอ — ขอบคุณที่มาบริจาคเลือด ยินดีต้อนรับค่ะ</div>`;
+    $('counts').textContent = `รอเรียก ${th(D.waiting_count)} ท่าน · มีนัดวันนี้อีก ${th(D.expected_count)} ท่าน`;
+  }
+
+  // ---------- เรื่องราวด้านซ้าย (หมุนเวียน) ----------
+  const liffUrl = () => (C.LIFF_ID && !/^x+-/i.test(C.LIFF_ID) ? 'https://liff.line.me/' + C.LIFF_ID : '');
+  const SLIDES = [
+    (d) => `<div class="hero serif">ยินดีต้อนรับ</div><div class="rule"></div>
+      <div class="lead serif">ขอบคุณที่เลือกมาให้เลือดกับเรา</div>
+      <div class="sub">${d.today_done > 0 ? `วันนี้มีผู้ใจบุญมอบเลือดแล้ว <b style="color:var(--gold)" data-count="${d.today_done}">${th(d.today_done)}</b> ท่าน` : 'ทุกหยดจากท่าน คือโอกาสให้ผู้ป่วยได้ไปต่อ'}</div>`,
+    (d) => d.month_done > 0 && `<div class="sub" style="margin:0">เดือนนี้ เลือดจากพวกเราช่วยผู้ป่วยได้สูงสุด</div>
+      <div class="bignum" data-count="${d.month_done * 3}">${th(d.month_done * 3)}</div><div class="lead serif" style="margin-top:0">ชีวิต</div>
+      <div class="trio"><div><b data-count="${d.today_done}">${th(d.today_done)}</b><span>ถุงเลือดวันนี้</span></div>
+        <div><b data-count="${d.month_done}">${th(d.month_done)}</b><span>ถุงเลือดเดือนนี้</span></div>
+        <div><b data-count="${d.year_done}">${th(d.year_done)}</b><span>ถุงเลือดปีนี้</span></div></div>`,
+    (d) => d.month_used > 0 && `<div class="sub" style="margin:0">เดือนนี้ เลือดที่ท่านให้ถูกนำไปใช้ช่วยผู้ป่วยแล้ว</div>
+      <div class="bignum" data-count="${d.month_used}">${th(d.month_used)}</div><div class="lead serif" style="margin-top:0">ถุง</div>
+      <div class="sub">เมื่อเลือดของท่านถูกใช้ เราจะแจ้งให้ทราบทาง LINE</div>`,
+    (d) => (d.thanks?.length || d.milestones?.length) && `<div class="hero serif" style="font-size:calc(var(--u)*8)">ขอบคุณจากใจ</div>
+      ${d.thanks?.length ? `<div class="names">${d.thanks.slice(0, 10).map((n) => `<span><i>♥</i>${esc(n)}</span>`).join('')}</div>` : ''}
+      ${d.milestones?.length ? `<div class="miles">ขอแสดงความยินดีกับผู้บริจาคครบรอบ<br>${d.milestones.map((m) => `${esc(m.name)} บริจาคครบ ${th(m.n)} ครั้ง`).join(' · ')}</div>` : ''}`,
+    (d) => d.today_first > 0 && `<div class="hero serif" style="font-size:calc(var(--u)*9)">ก้าวแรกที่งดงาม</div><div class="rule"></div>
+      <div class="lead serif">วันนี้มีผู้บริจาคหน้าใหม่ <b style="color:var(--gold)">${th(d.today_first)}</b> ท่าน</div><div class="sub">ขอบคุณที่ตัดสินใจมอบน้ำใจเป็นครั้งแรก</div>`,
+    () => `<div class="hero serif" style="font-size:calc(var(--u)*8)">ให้แล้วได้บุญ ได้ชีวิต</div>
+      <div class="reasons"><p>ร่างกายสร้างเลือดใหม่ทดแทนได้เองภายในไม่กี่สัปดาห์</p><p>บริจาคได้ทุก 3 เดือน เป็นบุญที่ทำซ้ำได้ตลอดปี</p><p>เลือด 1 ถุง ช่วยชีวิตผู้ป่วยได้สูงสุด 3 คน</p></div>`,
+    () => liffUrl() && `<div class="qrwrap"><div class="qrbox" id="qrbox"></div><div class="qrtext"><div class="hero serif" style="font-size:calc(var(--u)*7.4)">ครั้งต่อไป จองคิวล่วงหน้า</div>
+      <div class="sub">สแกนด้วยกล้องมือถือ หรือเปิดผ่าน LINE ของธนาคารเลือด รพ.อ่างทอง เลือกวันและเวลาที่สะดวกได้เลย</div></div></div>`,
+  ];
+  function showSlide(first) {
+    if (!D) return;
+    const n = SLIDES.length; let html = null;
+    for (let i = 1; i <= n && !html; i++) { const idx = (sIdx + i) % n; const h = SLIDES[idx](D); if (h) { html = h; sIdx = idx; } }
+    const el = $('slide');
+    const apply = () => {
+      el.innerHTML = html;
+      const qb = $('qrbox');
+      if (qb && window.qrcode) { const q = qrcode(0, 'M'); q.addData(liffUrl()); q.make(); qb.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); }
+      if (!REDUCE) el.querySelectorAll('[data-count]').forEach((e) => {
+        const to = Number(e.dataset.count), t0 = performance.now();
+        const step = (t) => { const p = Math.min(1, (t - t0) / 1400); e.textContent = th(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(step); };
+        requestAnimationFrame(step);
+      });
+      el.classList.remove('out');
+    };
+    if (first || REDUCE) apply(); else { el.classList.add('out'); setTimeout(apply, 700); }
+  }
+
+  function renderTicker() {
+    const parts = [...TICKER];
+    if (D.thanks?.length) parts.unshift('ขอบคุณ ' + D.thanks.slice(0, 6).join(' · ') + ' ที่มาบริจาคเลือดวันนี้');
+    const html = parts.map(esc).join('<i>♥</i>');
+    const key = html; if ($('ticker').dataset.k !== key) { $('ticker').dataset.k = key; $('ticker').innerHTML = html + '<i>♥</i>' + html; }
+  }
+
+  // ---------- ประกาศเรียกคิว / ต้อนรับ ----------
+  const callQ = []; let callBusy = false;
+  function nextCall() {
+    if (callBusy || !callQ.length) return;
+    callBusy = true; const c = callQ.shift();
+    $('cn').textContent = c.queue; $('cm').textContent = c.name || '';
+    $('call').classList.add('on'); chime();
+    setTimeout(() => { $('call').classList.remove('on'); setTimeout(() => { callBusy = false; nextCall(); }, 600); }, 8000);
+  }
+  let wTimer = null;
+  function welcome(w) {
+    const el = $('welcome');
+    el.textContent = `ยินดีต้อนรับ ${w.name || 'ผู้ใจบุญท่านใหม่'} · คิว ${w.queue}`;
+    el.classList.add('on'); clearTimeout(wTimer); wTimer = setTimeout(() => el.classList.remove('on'), 7000);
+  }
+
+  function onData(d) {
+    D = d;
+    if (prev) {
+      const pc = new Set((prev.calling || []).map((x) => x.queue)), pw = new Set((prev.waiting || []).map((x) => x.queue));
+      (d.calling || []).filter((x) => !pc.has(x.queue)).reverse().forEach((x) => callQ.push(x));
+      (d.waiting || []).filter((x) => !pw.has(x.queue) && !pc.has(x.queue)).slice(0, 1).forEach(welcome);
+      nextCall();
+    }
+    prev = d;
+    $('bad').style.display = 'none';
+    renderQueue(); renderTicker();
+    if (sIdx < 0) { showSlide(true); timer = setInterval(() => showSlide(false), SLIDE_MS); }
+  }
+  window.__tvFeed = onData; window.__next = () => showSlide(true);   // ใช้ทดสอบ
+
+  function setStatus(ok) { const s = $('status'); s.className = ok ? '' : 'bad'; s.textContent = ok ? 'เชื่อมต่อแล้ว' : 'กำลังเชื่อมต่อใหม่...'; }
+  async function poll() {
+    try {
+      const r = await fetch(`${C.SUPABASE_URL}/rest/v1/rpc/tv_board`, {
+        method: 'POST', headers: { apikey: C.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_token: K }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (j === null) { $('bad').style.display = 'flex'; $('bad').innerHTML = 'ลิงก์หน้าจอนี้ไม่ถูกต้องหรือหมดอายุ<br><small>ขอลิงก์ใหม่ได้ที่แดชบอร์ด &gt; แท็บ "แจ้งเตือนผู้บริจาค (LINE)"</small>'; return; }
+      onData(j); setStatus(true);
+    } catch (e) { setStatus(false); }
+  }
+
+  const demoData = () => ({
+    calling: [{ queue: 'B007', name: 'คุณสมชาย ส.' }], waiting: [{ queue: 'B008', name: 'คุณมานี ม.' }, { queue: 'B009', name: null }, { queue: 'B010', name: 'คุณวิชัย ก.' }],
+    waiting_count: 3, expected_count: 5, today_done: 6, today_first: 2, month_done: 148, year_done: 1620, month_used: 61,
+    thanks: ['คุณสมศรี ร.', 'คุณประเสริฐ ล.', 'คุณวรรณา ท.'], milestones: [{ name: 'คุณธนา พ.', n: 20 }],
+  });
+  if (DEMO) { onData(demoData()); }
+  else if (!K) { $('bad').style.display = 'flex'; $('bad').innerHTML = 'ไม่พบรหัสในลิงก์<br><small>เปิดลิงก์จากแดชบอร์ด &gt; แท็บ "แจ้งเตือนผู้บริจาค (LINE)" &gt; หน้าจอทีวี</small>'; }
+  else { poll(); setInterval(poll, POLL_MS); }
+
+  // รีโหลดหน้าทุกวัน 03:00 น. (รับโค้ดใหม่และกันหน้าจอค้างเมื่อเปิดทิ้งไว้นาน ๆ)
+  setInterval(() => { const t = new Date(Date.now() + 7 * 3600e3); if (t.getUTCHours() === 3 && t.getUTCMinutes() === 0) location.reload(); }, 60000);
+})();
+</script>
+</body>
+</html>
