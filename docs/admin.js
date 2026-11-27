@@ -171,8 +171,9 @@
   async function dayView() {
     $('bk').innerHTML = `<div class="row"><input type="date" id="d" value="${S.date}">
         <button class="btn sec sm" id="prev">◀ วันก่อน</button><button class="btn sec sm" id="next">วันถัดไป ▶</button>
-        <button class="btn sec sm" id="today">วันนี้</button></div>
+        <button class="btn sec sm" id="today">วันนี้</button>${stickerBar()}</div>
       <div id="list" class="mute">กำลังโหลด...</div>`;
+    bindStickerBar();
     $('d').onchange = () => { S.date = $('d').value; bookings(); };
     const shift = (n) => { S.date = addDays(S.date, n); bookings(); };
     $('prev').onclick = () => shift(-1); $('next').onclick = () => shift(1);
@@ -206,7 +207,7 @@
         const u = users.get(b.user_id); const [t, c] = STATUS[b.status];
         html += `<tr><td>${b.queue_no ? 'B' + String(b.queue_no).padStart(3, '0') : '-'}</td><td>${esc(u?.full_name || u?.display_name || '(ไม่ระบุ)')}</td><td>${esc(u?.phone || '-')}</td>
           <td><span class="tag ${c}">${t}</span>${b.status === 'completed' ? bagCell(b.id, dons.get(b.id)) : ''}</td>
-          <td>${NEXT[b.status] ? `<button class="btn sm" data-next="${b.id}" data-to="${NEXT[b.status][0]}" data-cur="${b.status}">${NEXT[b.status][1]}</button> ` : ''}<select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
+          <td>${b.status !== 'cancelled' && u ? `<button class="btn sec sm" data-stk="${b.user_id}" data-bk="${b.id}" title="พิมพ์สติ๊กเกอร์ติดใบยินยอม">🏷 สติ๊กเกอร์</button> ` : ''}${NEXT[b.status] ? `<button class="btn sm" data-next="${b.id}" data-to="${NEXT[b.status][0]}" data-cur="${b.status}">${NEXT[b.status][1]}</button> ` : ''}<select data-id="${b.id}" data-cur="${b.status}">${Object.entries(STATUS).map(([k, [n]]) => `<option value="${k}" ${k === b.status ? 'selected' : ''}>${n}</option>`).join('')}</select></td></tr>`;
       }
     }
     $('list').className = '';
@@ -225,9 +226,72 @@
         donationForm(b.id, u?.full_name || u?.display_name || '', S.date, null, bookings);
       } else bookings();
     };
+    document.querySelectorAll('#list [data-stk]').forEach((btn) => (btn.onclick = () => printSticker(btn.dataset.stk, btn.dataset.bk)));
     document.querySelectorAll('#list [data-next]').forEach((btn) => (btn.onclick = () => setStatus(btn.dataset.next, btn.dataset.to, btn.dataset.cur)));
     document.querySelectorAll('#list select').forEach((sel) => (sel.onchange = () => setStatus(sel.dataset.id, sel.value, sel.dataset.cur, () => { sel.value = sel.dataset.cur; })));
   }
+
+  // ---------- สติ๊กเกอร์รายละเอียดผู้บริจาค 5×2 ซม. (เครื่องพิมพ์ Zebra ม้วนต่อเนื่อง) ----------
+  // ข้อมูลมาจากฟังก์ชัน staff_sticker (เฉพาะเจ้าหน้าที่ · มีบันทึกการพิมพ์) · พิมพ์ผ่านหน้าต่างพิมพ์ของเบราว์เซอร์ ตั้งขนาดกระดาษ 50×20 มม.
+  const STK = { W: 50, H: 20 };   // ขนาดสติ๊กเกอร์ (มม.) — แก้ที่นี่ถ้าเปลี่ยนม้วนสติ๊กเกอร์
+  const GENDER_TH = { male: 'ชาย', female: 'หญิง', other: 'อื่น ๆ' };
+  const fmtCid = (c) => (c && /^\d{13}$/.test(c) ? `${c[0]}-${c.slice(1, 5)}-${c.slice(5, 10)}-${c.slice(10, 12)}-${c[12]}` : c || '-');
+  const thDMY = (d) => { if (!d) return '-'; const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}/${m}/${Number(y) + 543}`; };
+  const stickerCopies = () => { try { return Math.min(5, Math.max(1, Number(localStorage.getItem('stk_copies')) || 1)); } catch { return 1; } };
+  const setStickerCopies = (n) => { try { localStorage.setItem('stk_copies', String(Math.min(5, Math.max(1, Number(n) || 1)))); } catch { /* ไม่เป็นไร */ } };
+  const stickerHtml = (x) => {
+    const name = x.full_name || '-';
+    const nameCls = name.length > 24 ? 'n sm' : 'n';
+    const q = x.queue_no ? `คิว B${String(x.queue_no).padStart(3, '0')}` : '';
+    const line3 = [x.gender ? (GENDER_TH[x.gender] || '') : '', x.age != null ? `อายุ ${x.age} ปี` : '', x.birth_date ? `เกิด ${thDMY(x.birth_date)}` : ''].filter(Boolean).join(' · ');
+    const line5 = [q, x.booking_date ? `นัด ${thDMY(x.booking_date)}` : ''].filter(Boolean).join(' · ');
+    return `<div class="s"><div class="${nameCls}">${esc(name)}</div>
+      <div class="r">บัตร ปชช. ${esc(fmtCid(x.cid))}</div>
+      <div class="r">${esc(line3 || '-')}</div>
+      <div class="r">โทร ${esc(x.phone || '-')}</div>${line5 ? `<div class="r">${esc(line5)}</div>` : ''}</div>`;
+  };
+  const stickerPage = (items, copies) => {
+    const one = items.map(stickerHtml).join('');
+    const pages = Array.from({ length: copies }, () => one).join('');
+    return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title> </title><style>
+      @page { size: ${STK.W}mm ${STK.H}mm; margin: 0; }
+      html, body { margin: 0; padding: 0; background: #fff; }
+      body { font-family: 'Sarabun','Leelawadee UI','Tahoma','Noto Sans Thai',sans-serif; color: #000; }
+      .s { width: ${STK.W}mm; height: ${STK.H}mm; box-sizing: border-box; padding: 1.4mm 2mm; overflow: hidden; page-break-after: always; break-after: page; }
+      .s:last-child { page-break-after: auto; break-after: auto; }
+      .n { font-size: 9.5pt; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; }
+      .n.sm { font-size: 8pt; }
+      .r { font-size: 7.2pt; line-height: 1.3; white-space: nowrap; overflow: hidden; }
+    </style></head><body>${pages}</body></html>`;
+  };
+  const printHtml = (html) => {
+    const f = document.createElement('iframe');
+    f.id = 'stkframe'; f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const d = f.contentDocument; d.open(); d.write(html); d.close();
+    setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { fail(e); } }, 350);
+    setTimeout(() => f.remove(), 120000);
+  };
+  async function printSticker(userId, bookingId) {
+    const copies = stickerCopies();
+    msg('กำลังเตรียมสติ๊กเกอร์...');
+    const { data, error } = await sb.rpc('staff_sticker', { p_user: userId, p_booking: bookingId || null, p_copies: copies });
+    if (error) return fail(error);
+    const x = Array.isArray(data) ? data[0] : data;
+    if (!x) return msg('พิมพ์ไม่ได้: ผู้บริจาคลบข้อมูลหรือยังไม่ได้ยินยอมนโยบาย', true);
+    msg(`ส่งสติ๊กเกอร์ ${copies} ดวงไปหน้าต่างพิมพ์แล้ว (เลือกเครื่องพิมพ์ Zebra, ขนาดกระดาษ ${STK.W}×${STK.H} มม.)`);
+    printHtml(stickerPage([x], copies));
+  }
+  const stickerTest = () => {   // ข้อมูลสมมติ ไม่เรียกฐานข้อมูล ใช้ตั้งค่าเครื่องพิมพ์/ตรวจตำแหน่ง
+    printHtml(stickerPage([{ full_name: 'นายทดสอบ สติ๊กเกอร์', cid: '1234567890123', birth_date: '1990-05-01', age: 36, gender: 'male', phone: '081-234-5678', queue_no: 7, booking_date: bkkToday() }], 1));
+  };
+  const stickerBar = () => `<span class="mute" style="margin-left:8px">สติ๊กเกอร์ต่อคน
+    <input type="number" id="stkn" min="1" max="5" value="${stickerCopies()}" style="width:54px"> ดวง</span>
+    <button class="btn sec sm" id="stktest" title="พิมพ์สติ๊กเกอร์ตัวอย่าง (ข้อมูลสมมติ) เพื่อตั้งค่าเครื่องพิมพ์ Zebra">ทดสอบพิมพ์สติ๊กเกอร์</button>`;
+  const bindStickerBar = () => {
+    const n = $('stkn'); if (n) n.onchange = () => { setStickerCopies(n.value); n.value = stickerCopies(); };
+    const t = $('stktest'); if (t) t.onclick = stickerTest;
+  };
 
   // ---------- ข้อมูลถุงเลือดของการบริจาคที่สำเร็จ ----------
   const RH_TH = { pos: 'Rh+', neg: 'Rh−' };
@@ -539,7 +603,9 @@
   function search() {
     $('view').innerHTML = `<div class="card"><h2>ค้นหาผู้บริจาค</h2>
       <div class="row"><input id="q" placeholder="ชื่อ-นามสกุล หรือ LINE User ID" style="min-width:280px"><button class="btn" id="go">ค้นหา</button></div>
+      <div class="row" style="margin-top:6px">${stickerBar()}</div>
       <div id="res" class="mute">พิมพ์อย่างน้อย 2 ตัวอักษร</div></div><div id="detail"></div>`;
+    bindStickerBar();
     const run = async () => {
       // ตัดอักขระที่มีความหมายใน PostgREST filter ออก
       const q = $('q').value.trim().replace(/[,()%*\\]/g, '');
@@ -550,8 +616,9 @@
       if (error) return fail(error);
       $('res').innerHTML = data.length
         ? `<table><tr><th>ชื่อ-นามสกุล</th><th>ชื่อใน LINE</th><th>เบอร์โทร</th><th></th></tr>${data.map((u) => `<tr><td>${esc(u.full_name || '-')}</td><td>${esc(u.display_name || '-')}</td><td>${esc(u.phone || '-')}</td>
-            <td><button class="btn sec sm" data-u="${u.id}">ดูประวัติ</button></td></tr>`).join('')}</table>` : 'ไม่พบข้อมูล';
-      document.querySelectorAll('#res button').forEach((b) => (b.onclick = () => detail(data.find((u) => u.id === b.dataset.u))));
+            <td><button class="btn sec sm" data-u="${u.id}">ดูประวัติ</button> <button class="btn sec sm" data-stk="${u.id}" title="พิมพ์สติ๊กเกอร์ติดใบยินยอม">🏷 สติ๊กเกอร์</button></td></tr>`).join('')}</table>` : 'ไม่พบข้อมูล';
+      document.querySelectorAll('#res [data-u]').forEach((b) => (b.onclick = () => detail(data.find((u) => u.id === b.dataset.u))));
+      document.querySelectorAll('#res [data-stk]').forEach((b) => (b.onclick = () => printSticker(b.dataset.stk, null)));
     };
     $('go').onclick = run; $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   }

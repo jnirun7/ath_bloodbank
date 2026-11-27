@@ -487,6 +487,9 @@
           </ul>
         </div>
         <p class="mute">แนะนำให้กด "ดาวน์โหลดข้อมูลของฉัน" ด้านบนเก็บไว้ก่อน</p>
+        ${d.cid_last3 ? `<label for="ecid" style="font-weight:500;display:block;margin-top:6px">ยืนยันตัวตน: กรอกเลขบัตรประชาชน 13 หลักของคุณ</label>
+        <input id="ecid" type="password" inputmode="numeric" autocomplete="off" maxlength="17" placeholder="เลขบัตรประชาชน 13 หลัก (ลงท้ายด้วย ${esc(d.cid_last3)})">
+        <p class="mute" style="margin:4px 0 10px">ต้องตรงกับที่ลงทะเบียนไว้จึงจะลบได้ · กรอกผิดครบ 5 ครั้ง ระบบล็อกการลบ 30 นาที</p>` : ''}
         <label style="display:flex;gap:8px;font-weight:500"><input type="checkbox" id="ack" style="margin-top:4px"> <span>ฉันอ่านและเข้าใจผลที่จะเกิดขึ้นแล้ว ต้องการลบข้อมูลของฉัน</span></label>
         <div id="err"></div>
         <button id="erase" disabled style="background:#b71c1c">ลบข้อมูลของฉันถาวร</button>
@@ -498,7 +501,11 @@
     document.getElementById('popt').onchange = (ev) => savePref({ recall_optout: ev.target.checked });
     on('edit', () => profileForm(true));
     const ack = document.getElementById('ack'), er = document.getElementById('erase');
-    ack.addEventListener('change', () => { er.disabled = !ack.checked; });
+    const ecid = document.getElementById('ecid');   // มีเฉพาะผู้ที่เคยกรอกเลขบัตรไว้
+    const cidDigits = () => (ecid ? ecid.value.replace(/\D/g, '') : '');
+    const syncErase = () => { er.disabled = !(ack.checked && (!ecid || cidDigits().length === 13)); };
+    ack.addEventListener('change', syncErase);
+    if (ecid) ecid.addEventListener('input', syncErase);
     on('dl', async () => {
       const out = document.getElementById('dlout');
       try {
@@ -515,16 +522,16 @@
       } catch (e) { out.innerHTML = errHtml(e); }
     });
     on('erase', async () => {
-      if (!ack.checked) return;
+      if (!ack.checked || er.disabled) return;
       if (!confirm('ยืนยันครั้งสุดท้าย: ลบข้อมูลของคุณถาวร?')) return;
       er.disabled = true;
       try {
-        const r = await api('erase', { confirm: true });
+        const r = await api('erase', { confirm: true, cid: cidDigits() });
         render(`<div class="card"><h2>ลบข้อมูลเรียบร้อยแล้ว</h2>
           <p>ข้อมูลส่วนบุคคลของคุณถูกลบออกจากระบบแล้ว${r.cancelled ? ` และยกเลิกคิวที่รออยู่ ${r.cancelled} คิว` : ''}</p>
           <p class="mute">หากต้องการใช้งานอีกครั้ง ให้เปิดระบบใหม่และยินยอมนโยบายอีกครั้ง</p></div>`);
         setTimeout(() => { try { liff.closeWindow(); } catch { /* ignore */ } }, 3500);
-      } catch (e) { er.disabled = false; showErr(e); }
+      } catch (e) { if (ecid) ecid.value = ''; er.disabled = true; showErr(e); }
     });
   }
 
